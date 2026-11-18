@@ -19,9 +19,9 @@ import androidx.test.ext.junit.runners.AndroidJUnit4;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
+import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.FileOutputStream;
-import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
@@ -59,7 +59,6 @@ public class X5DownloadTest {
         Context context = ApplicationProvider.getApplicationContext();
         SharedPreferences downloads = context.getSharedPreferences("x5_download", Context.MODE_PRIVATE);
         downloads.edit().clear().putLong("id", Long.MAX_VALUE)
-                .putString("part", "x5-" + UUID.randomUUID() + ".part")
                 .putString("kernel", X5Kernel.ONLINE_32.name())
                 .putLong("deadline", System.currentTimeMillis() + 30_000).commit();
         Intent intent = new Intent(context, DownloadActivity.class)
@@ -77,22 +76,16 @@ public class X5DownloadTest {
     }
 
     @Test
-    public void completedDownloadMovesOnlyItsStagedFileAndCanBeRestored() throws Exception {
+    public void completedDownloadIsCopiedIntoAnAppSpecificStagingFile() throws Exception {
         Context context = ApplicationProvider.getApplicationContext();
-        File staged = File.createTempFile("x5-download", ".part", context.getCacheDir());
-        File destination = new File(context.getCacheDir(), "kernel-" + UUID.randomUUID() + ".apk");
+        File staged = DownloadActivity.copyToStaging(new ByteArrayInputStream(new byte[]{1, 2, 3}),
+                context.getCacheDir());
         try {
-            try (FileOutputStream output = new FileOutputStream(staged)) {
-                output.write(new byte[]{1, 2, 3});
-            }
-            DownloadActivity.Task task = new DownloadActivity.Task(1, staged.getName(), 0);
-            assertTrue(task.publish(destination));
-            assertFalse(staged.exists());
-            assertEquals(3, destination.length());
-            assertTrue(task.publish(destination));
+            assertEquals(context.getCacheDir(), staged.getParentFile());
+            assertTrue(staged.getName().endsWith(".part"));
+            assertEquals(3, staged.length());
         } finally {
             staged.delete();
-            destination.delete();
         }
     }
 

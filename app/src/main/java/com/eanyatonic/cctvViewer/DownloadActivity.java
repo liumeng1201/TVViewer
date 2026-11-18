@@ -7,9 +7,9 @@ import android.content.SharedPreferences;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Bundle;
-import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.ParcelFileDescriptor;
 import android.util.Log;
 import android.view.View;
 import android.widget.Button;
@@ -19,7 +19,9 @@ import android.widget.TextView;
 import androidx.appcompat.app.AppCompatActivity;
 
 import java.io.File;
-import java.util.UUID;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -110,16 +112,12 @@ public class DownloadActivity extends AppCompatActivity {
         progressBar.setIndeterminate(true);
         statusText.setText(R.string.x5_download_in_progress);
 
-        String partName = "x5-" + UUID.randomUUID() + ".part";
         try {
-            DownloadManager.Request request = new DownloadManager.Request(Uri.parse(kernel.downloadUrl()));
-            request.setTitle(getString(R.string.x5_download_title));
-            request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE);
-            request.setDestinationInExternalFilesDir(this, Environment.DIRECTORY_DOWNLOADS, partName);
-            long id = manager.enqueue(request);
-            task = new Task(id, partName, System.currentTimeMillis() + DOWNLOAD_TIMEOUT_MS);
+            long id = manager.enqueue(downloadRequest(Uri.parse(kernel.downloadUrl()),
+                    getString(R.string.x5_download_title)));
+            task = new Task(id, System.currentTimeMillis() + DOWNLOAD_TIMEOUT_MS);
             if (!downloads.edit().putLong("id", id).putString("kernel", kernel.name())
-                    .putString("part", partName).putLong("deadline", task.deadline).commit()) {
+                    .putLong("deadline", task.deadline).commit()) {
                 throw new IllegalStateException("Could not persist the download");
             }
             monitorTask();
@@ -130,20 +128,25 @@ public class DownloadActivity extends AppCompatActivity {
         }
     }
 
+    static DownloadManager.Request downloadRequest(Uri url, CharSequence title) {
+        // Android 5 requires storage permission for an explicit file URI.
+        // Use DownloadManager's cache and copy the completed file into app storage.
+        return new DownloadManager.Request(url).setTitle(title)
+                .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE);
+    }
+
     private Task restoreTask() {
         long id = downloads.getLong("id", -1);
-        String part = downloads.getString("part", "");
         long deadline = downloads.getLong("deadline", 0);
         if (id < 0) {
             return null;
         }
-        if (!kernel.name().equals(downloads.getString("kernel", null))
-                || !part.matches("x5-[0-9a-f-]{36}\\.part") || deadline <= 0) {
+        if (!kernel.name().equals(downloads.getString("kernel", null)) || deadline <= 0) {
             removeDownload(id);
             downloads.edit().clear().commit();
             return null;
         }
-        return new Task(id, part, deadline);
+        return new Task(id, deadline);
     }
 
     private void monitorTask() {
@@ -165,15 +168,71 @@ public class DownloadActivity extends AppCompatActivity {
         querying = true;
         worker.execute(() -> {
             DownloadState result = getDownloadState(requested.id);
+            boolean downloaded = result.status == DownloadManager.STATUS_SUCCESSFUL;
+            File staged = downloaded ? stageCompletedDownload(requested.id) : null;
             handler.post(() -> {
                 querying = false;
-                if (started && !completed && requested == task && !isFinishing()) {
-                    render(result);
-                } else if (started && !completed && task != null) {
-                    handler.post(poll);
+                if (canRender(requested)) {
+                    if (downloaded) {
+                        finishDownload(staged);
+                    } else {
+                        render(result);
+                    }
+                } else {
+                    deleteStagingFile(staged);
+                    if (started && !completed && task != null) {
+                        handler.post(poll);
+                    }
                 }
             });
         });
+    }
+
+    private boolean canRender(Task requested) {
+        return started && !completed && requested == task && !isFinishing();
+    }
+
+    private File stageCompletedDownload(long id) {
+        File directory = X5Kernel.downloadDirectory(getApplicationContext());
+        if (directory == null) {
+            return null;
+        }
+        try (InputStream input = new ParcelFileDescriptor.AutoCloseInputStream(
+                manager.openDownloadedFile(id))) {
+            return copyToStaging(input, directory);
+        } catch (IOException | RuntimeException error) {
+            Log.w(TAG, "Could not read completed X5 download", error);
+            return null;
+        }
+    }
+
+    static File copyToStaging(InputStream input, File directory) throws IOException {
+        File staged = File.createTempFile("x5-download-", ".part", directory);
+        boolean copied = false;
+        try {
+            try (FileOutputStream output = new FileOutputStream(staged)) {
+                byte[] buffer = new byte[8192];
+                int bytesRead;
+                while ((bytesRead = input.read(buffer)) != -1) {
+                    if (Thread.currentThread().isInterrupted()) {
+                        throw new IOException("Copying the download was interrupted");
+                    }
+                    output.write(buffer, 0, bytesRead);
+                }
+            }
+            copied = true;
+            return staged;
+        } finally {
+            if (!copied) {
+                deleteStagingFile(staged);
+            }
+        }
+    }
+
+    private static void deleteStagingFile(File file) {
+        if (file != null && file.exists() && !file.delete()) {
+            Log.w(TAG, "Could not delete staged X5 download");
+        }
     }
 
     private DownloadState getDownloadState(long id) {
@@ -196,9 +255,6 @@ public class DownloadActivity extends AppCompatActivity {
 
     private void render(DownloadState result) {
         switch (result.status) {
-            case DownloadManager.STATUS_SUCCESSFUL:
-                finishDownload();
-                return;
             case STATUS_MISSING:
                 clearTask();
                 showFailure(R.string.x5_download_missing);
@@ -218,9 +274,10 @@ public class DownloadActivity extends AppCompatActivity {
         }
     }
 
-    private void finishDownload() {
+    private void finishDownload(File staged) {
         File destination = kernel.downloadedFile(this);
-        if (destination == null || !task.publish(destination)) {
+        if (destination == null || staged == null || !staged.renameTo(destination)) {
+            deleteStagingFile(staged);
             clearTask();
             showFailure(R.string.x5_download_failed);
             return;
@@ -272,26 +329,19 @@ public class DownloadActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         completed = true;
-        handler.removeCallbacksAndMessages(null);
+        handler.removeCallbacks(poll);
+        handler.removeCallbacks(timeout);
         worker.shutdownNow();
         super.onDestroy();
     }
 
-    static final class Task {
+    private static final class Task {
         final long id;
-        final String partName;
         final long deadline;
 
-        Task(long id, String partName, long deadline) {
+        Task(long id, long deadline) {
             this.id = id;
-            this.partName = partName;
             this.deadline = deadline;
-        }
-
-        boolean publish(File target) {
-            File part = new File(target.getParentFile(), partName);
-            // The process may have stopped just after moving this task's output.
-            return part.isFile() ? part.renameTo(target) : target.isFile();
         }
     }
 

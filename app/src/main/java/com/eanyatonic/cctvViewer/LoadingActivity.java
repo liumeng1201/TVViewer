@@ -66,6 +66,10 @@ public class LoadingActivity extends AppCompatActivity {
             return;
         }
         if (!downloadedKernel.isFile()) {
+            if (downloadedSource != null) {
+                complete(R.string.x5_kernel_missing);
+                return;
+            }
             Intent download = new Intent(this, DownloadActivity.class);
             download.putExtra(DownloadActivity.EXTRA_KERNEL, kernel.name());
             startActivity(download);

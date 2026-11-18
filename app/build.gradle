@@ -28,6 +28,11 @@ android {
         targetCompatibility JavaVersion.VERSION_17
     }
 
+    lint {
+        // The GitHub APKs are sideloaded. Keep other Lint errors as CI failures.
+        warning.add('ExpiredTargetSdkVersion')
+    }
+
 }
 
 dependencies {

@@ -98,9 +98,21 @@ jobs:
           retention-days: 1
 
   emulator-tests:
-    name: Android Emulator Tests (API 30)
+    name: Android Emulator Tests (API ${{ matrix.api }})
     runs-on: ubuntu-24.04
     timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - api: 30
+            target: google_apis
+            arch: x86_64
+            test_args: ''
+          - api: 21
+            target: default
+            arch: x86
+            test_args: -Pandroid.testInstrumentationRunnerArguments.class=com.eanyatonic.cctvViewer.LegacyDownloadStorageTest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -121,17 +133,17 @@ jobs:
       - name: Run instrumentation tests
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
         with:
-          api-level: 30
-          target: google_apis
-          arch: x86_64
+          api-level: ${{ matrix.api }}
+          target: ${{ matrix.target }}
+          arch: ${{ matrix.arch }}
           disable-animations: true
-          script: ./gradlew :app:connectedDebugAndroidTest --no-daemon --stacktrace
+          script: ./gradlew :app:connectedDebugAndroidTest --no-daemon --stacktrace ${{ matrix.test_args }}
 
       - name: Upload instrumentation results
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: android-emulator-test-results
+          name: android-emulator-test-results-api-${{ matrix.api }}
           path: |
             app/build/reports/androidTests/connected/
             app/build/outputs/androidTest-results/connected/
