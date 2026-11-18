@@ -53,7 +53,7 @@ public class ChannelPlaybackTest {
             }, 500);
             </script>
             """;
-    private static final String PLAYING = dataPage(PLAYER_HTML);
+    static final String PLAYING = dataPage(PLAYER_HTML);
 
     @Test
     public void timedOutChannelKeepsPreviousVideoAndAllowsRetry() throws Exception {
