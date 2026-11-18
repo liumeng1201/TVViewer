@@ -65,8 +65,7 @@
 
     <Preference
         android:key="version"
-        android:title="版本号"
-        android:summary="Version 1.8.0" />
+        android:title="版本号" />
     <Preference
         android:key="info"
         android:title="操作系统信息"
