@@ -44,7 +44,7 @@ jobs:
         with:
           name: TVViewer-standard-${{ env.SHORT_SHA }}
           path: app/build/outputs/apk/debug/*.apk
-          retention-days: 30
+          retention-days: 1
 
   build-x5:
     name: Build X5 APK
@@ -79,4 +79,4 @@ jobs:
         with:
           name: TVViewer-X5-${{ env.SHORT_SHA }}
           path: app/build/outputs/apk/debug/*.apk
-          retention-days: 30
+          retention-days: 1
