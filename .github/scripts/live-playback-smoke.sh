@@ -27,7 +27,9 @@ adb logcat -c
 
 run_instrumentation() {
     local selection="$1" expected="$2" output="$3"
-    adb shell am instrument -w -r \
+    local deadline=$((expected * (10#$STARTUP_SECONDS + 75)))
+    # Bound the host-side wait if a WebView or the instrumentation process stops responding.
+    timeout --kill-after=10s "${deadline}s" adb shell am instrument -w -r \
         -e class "$selection" \
         -e livePlayback true \
         -e startupSeconds "$STARTUP_SECONDS" \
