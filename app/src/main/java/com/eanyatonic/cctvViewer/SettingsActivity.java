@@ -11,7 +11,6 @@ import androidx.preference.ListPreference;
 import androidx.preference.Preference;
 import androidx.preference.PreferenceFragmentCompat;
 import androidx.preference.PreferenceManager;
-import androidx.preference.SwitchPreference;
 import java.util.Objects;
 
 public class SettingsActivity extends AppCompatActivity {
@@ -34,7 +33,6 @@ public class SettingsActivity extends AppCompatActivity {
     }
 
     public static class SettingsFragment extends PreferenceFragmentCompat implements SharedPreferences.OnSharedPreferenceChangeListener {
-        private SwitchPreference sysWebViewPreference;
         private ListPreference x5WebViewVersion;
         private Preference systemInfo;
 
@@ -47,7 +45,6 @@ public class SettingsActivity extends AppCompatActivity {
             boolean isFirstRun = sharedPreferences.getBoolean("is_first_run", true);
 
             // 获取 SwitchPreference
-            sysWebViewPreference = findPreference("sys_webview");
             x5WebViewVersion = findPreference("x5_webview_version");
             boolean debugModeValue = sharedPreferences.getBoolean("debug_mode", false);
             boolean exists = AssetUtil.fileExistsInAssets(getContext(), "045738_x5.tbs.apk");
@@ -85,27 +82,6 @@ public class SettingsActivity extends AppCompatActivity {
                 editor.putBoolean("is_first_run", false);
                 editor.apply();
             }
-
-            if (sysWebViewPreference != null) {
-                boolean switchValue = sharedPreferences.getBoolean("sys_webview", true);
-                debugModeValue = sharedPreferences.getBoolean("debug_mode", false);
-
-                // 如果开关被关闭，禁用它
-                if (!switchValue && !debugModeValue) {
-                    sysWebViewPreference.setEnabled(false);
-                    sysWebViewPreference.setSummary("X5 WebView 已激活");
-                }
-                // 如果 X5 WebView 文件不存在，禁用它
-                String installX5Mode = sharedPreferences.getString("x5_webview_version", "0");
-                if (!exists) {
-                    assert installX5Mode != null;
-                    if (installX5Mode.equals("0")) {
-                        sysWebViewPreference.setEnabled(false);
-                        sysWebViewPreference.setSummary("程序未集成本地X5 WebView安装包");
-                    }
-                }
-            }
-
 
             systemInfo = findPreference("info");
             if (systemInfo != null) {

@@ -24,4 +24,10 @@
         <item>2</item>
         <item>3</item>
     </string-array>
+    <string name="x5_use_system">使用系统 WebView</string>
+    <string name="x5_kernel_missing">X5 内核包不可用，已切换到系统 WebView</string>
+    <string name="x5_install_failed">X5 内核无法安装或加载，已切换到系统 WebView</string>
+    <string name="x5_install_timeout">等待 X5 内核超时，已切换到系统 WebView</string>
+    <string name="x5_install_interrupted">上次 X5 安装中断，已切换到系统 WebView</string>
+    <string name="x5_install_cancelled">已取消 X5 安装，已切换到系统 WebView</string>
 </resources>

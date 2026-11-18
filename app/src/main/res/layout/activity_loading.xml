@@ -14,4 +14,11 @@
         android:layout_height="wrap_content"
         android:text="正在安装X5内核，请您稍等..."
         android:layout_marginTop="16dp" />
+    <Button
+        android:id="@+id/useSystemWebView"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:text="@string/x5_use_system" />
+
 </LinearLayout>

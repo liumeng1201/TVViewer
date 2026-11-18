@@ -1,8 +1,6 @@
 package com.eanyatonic.cctvViewer;
 
 
-import com.eanyatonic.cctvViewer.FileUtils;
-
 import android.Manifest;
 import androidx.core.content.ContextCompat;
 import androidx.core.app.ActivityCompat;
@@ -11,18 +9,18 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageInfo;
-import android.graphics.Bitmap;
 import android.media.AudioManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
+import android.os.Looper;
 import android.os.SystemClock;
-import android.util.DisplayMetrics;
 import android.util.Log;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
 import android.widget.Button;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -32,33 +30,14 @@ import androidx.preference.PreferenceManager;
 
 // X5内核代码
 import com.tencent.smtt.export.external.TbsCoreSettings;
-import com.tencent.smtt.export.external.extension.interfaces.IX5WebSettingsExtension;
 import com.tencent.smtt.sdk.QbSdk;
-import com.tencent.smtt.sdk.WebChromeClient;
-import com.tencent.smtt.sdk.WebSettings;
-import com.tencent.smtt.sdk.WebView;
-import com.tencent.smtt.sdk.WebViewClient;
 
 import java.util.HashMap;
-import java.util.Objects;
-
-// WebView内核代码
-//import android.webkit.SslErrorHandler;
-//import android.webkit.WebChromeClient;
-//import android.webkit.WebSettings;
-//import android.webkit.WebView;
-//import android.webkit.WebViewClient;
 
 public class MainActivity extends AppCompatActivity {
 
     private AudioManager audioManager;
-
-    private WebView webView0; // 导入 WebView
-    private WebView webView1; // 导入备用 WebView
-    private boolean canLoadX5 = false;
-
-    private int currentWebView = 0; // 正在使用的webView
-    private boolean isChanging = false; // 是否正在换台
+    private ChannelPlayback playback;
 
     private final String[] liveUrls = { "https://tv.cctv.com/live/cctv1/", "https://tv.cctv.com/live/cctv2/",
             "https://tv.cctv.com/live/cctv3/", "https://tv.cctv.com/live/cctv4/", "https://tv.cctv.com/live/cctv5/",
@@ -95,7 +74,7 @@ public class MainActivity extends AppCompatActivity {
 
     private boolean doubleBackToExitPressedOnce = false;
 
-    private StringBuilder digitBuffer = new StringBuilder(); // 用于缓存按下的数字键
+    private final StringBuilder digitBuffer = new StringBuilder();
     private static final long DIGIT_TIMEOUT = 3000; // 超时时间（毫秒）
 
     private TextView inputTextView; // 用于显示正在输入的数字的 TextView
@@ -106,10 +85,13 @@ public class MainActivity extends AppCompatActivity {
     // 频道显示view
     private TextView overlayTextView;
 
-    private String info = "";
-
-    // 在 MainActivity 中添加一个 Handler
-    private final Handler handler = new Handler();
+    private final Handler handler = new Handler(Looper.getMainLooper());
+    private final Runnable submitDigits = this::handleNumericInput;
+    private final Runnable hideOverlay = () -> {
+        if (overlayTextView != null) {
+            overlayTextView.setVisibility(View.GONE);
+        }
+    };
 
     private boolean isMenuOverlayVisible = false;
     private boolean isDrawerOverlayVisible = false;
@@ -135,11 +117,14 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        setContentView(R.layout.activity_main);
-
         // 加载设置
         // 获取 SharedPreferences
         SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(this);
+        boolean canLoadX5 = prepareWebViewKernel(sharedPreferences);
+        if (isFinishing()) {
+            return;
+        }
+        setContentView(R.layout.activity_main);
 
         // 读取字体大小
         String selectedOption = sharedPreferences.getString("text_size", "1");
@@ -168,18 +153,12 @@ public class MainActivity extends AppCompatActivity {
         // 读取双缓冲设置
         enableDualWebView = sharedPreferences.getBoolean("dual_webview", false);
 
-        // 读取WebView设置
-        Boolean forceSysWebView = sharedPreferences.getBoolean("sys_webview", true);
-
         // 获取 AudioManager 实例
         audioManager = (AudioManager) getSystemService(AUDIO_SERVICE);
 
-        // 初始化 WebView
-        webView0 = findViewById(R.id.webView0);
-        webView1 = findViewById(R.id.webView1);
-
         // 初始化显示正在输入的数字的 TextView
         inputTextView = findViewById(R.id.inputTextView);
+        inputTextView.setVisibility(View.GONE);
 
         // 初始化 loadingOverlay
         loadingOverlay = findViewById(R.id.loadingOverlay);
@@ -298,430 +277,83 @@ public class MainActivity extends AppCompatActivity {
             subMenuLocal.addView(button);
         }
 
-        // https://developer.android.com/reference/android/webkit/WebView.html#getCurrentWebViewPackage()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) { // Android 8.0+
-            PackageInfo pkgInfo = WebView.getCurrentWebViewPackage();
+        if (canLoadX5) {
+            CoreText.setText("当前程序运行在腾讯X5内核上");
+            requestPermission();
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            PackageInfo pkgInfo = android.webkit.WebView.getCurrentWebViewPackage();
             if (pkgInfo != null) {
                 CoreText.setText("当前程序运行在系统WebView上，版本号：" + pkgInfo.versionName);
             }
         }
 
-        // X5内核代码
-        if (!forceSysWebView) {
-            QbSdk.unForceSysWebView();
-            requestPermission();
-
-            Log.d("versionX5",String.valueOf(QbSdk.getTbsVersion(getApplicationContext())));
-            canLoadX5 = QbSdk.canLoadX5(getApplicationContext());
-            Log.d("canLoadX5", String.valueOf(canLoadX5));
-            if (canLoadX5) {
-                CoreText.setText("当前程序运行在腾讯X5内核上");
-            } else {
-                Intent intent = new Intent(MainActivity.this, LoadingActivity.class);
-                startActivity(intent);
-                finish(); // 销毁 MainActivity
-            }
-        }
-        else{
-            QbSdk.forceSysWebView();
-        }
-
-        HashMap<String, Object> map = new HashMap<>(2);
-        map.put(TbsCoreSettings.TBS_SETTINGS_USE_SPEEDY_CLASSLOADER, true);
-        map.put(TbsCoreSettings.TBS_SETTINGS_USE_DEXLOADER_SERVICE, true);
-        QbSdk.initTbsSettings(map);
-
-        // 配置 WebView 设置
-        WebSettings webSettings = webView0.getSettings();
-        webSettings.setJavaScriptEnabled(true);
-        webSettings.setDomStorageEnabled(true);
-        webSettings.setDatabaseEnabled(true);
-        webSettings.setLoadsImagesAutomatically(false); // 禁用自动加载图片
-        webSettings.setBlockNetworkImage(true); // 禁用网络图片加载
-        webSettings.setMediaPlaybackRequiresUserGesture(false);
-        webSettings.setUserAgent(
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36");
-
-        // 启用缓存
-        webSettings.setCacheMode(WebSettings.LOAD_DEFAULT);
-
-        // 启用 JavaScript 自动点击功能
-        webSettings.setJavaScriptCanOpenWindowsAutomatically(true);
-
-        // 配置 WebView 设置
-        WebSettings webSettings1 = webView1.getSettings();
-        webSettings1.setJavaScriptEnabled(true);
-        webSettings1.setDomStorageEnabled(true);
-        webSettings1.setDatabaseEnabled(true);
-        webSettings1.setLoadsImagesAutomatically(false); // 禁用自动加载图片
-        webSettings1.setBlockNetworkImage(true); // 禁用网络图片加载
-        webSettings1.setMediaPlaybackRequiresUserGesture(false);
-        webSettings1.setUserAgent(
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36");
-
-        // 启用缓存
-        webSettings1.setCacheMode(WebSettings.LOAD_DEFAULT);
-
-        // 启用 JavaScript 自动点击功能
-        webSettings1.setJavaScriptCanOpenWindowsAutomatically(true);
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            // X5内核代码
-            webSettings.setMixedContentMode(com.tencent.smtt.sdk.WebSettings.LOAD_NORMAL);
-            webSettings1.setMixedContentMode(com.tencent.smtt.sdk.WebSettings.LOAD_NORMAL);
-            // 系统WebView内核代码
-            // webView.getSettings().setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
-        }
-
-        // 设置 WebViewClient 和 WebChromeClient
-        webView0.setWebViewClient(new WebViewClient() {
-            // X5内核代码
-            @Override
-            public void onReceivedSslError(com.tencent.smtt.sdk.WebView webView,
-                    com.tencent.smtt.export.external.interfaces.SslErrorHandler handler,
-                    com.tencent.smtt.export.external.interfaces.SslError error) {
-                handler.proceed(); // 忽略 SSL 错误
-            }
-
-            // 系统Webview内核代码
-            // @Override
-            // public void onReceivedSslError(WebView view, SslErrorHandler handler,
-            // SslError error) {
-            // handler.proceed(); // 忽略 SSL 错误
-            // }
-
-            @Override
-            public void onPageStarted(WebView view, String url, Bitmap favicon) {
-                // 页面加载时执行 JavaScript 脚本
-                view.evaluateJavascript(
-                        """
-                                function FastLoading() {
-                                             const fullscreenBtn = document.querySelector('#player_pagefullscreen_yes_player') || document.querySelector('.videoFull');
-                                             if (fullscreenBtn) return;
-
-                                             // 清空所有图片的 src 属性，阻止图片加载
-                                             Array.from(document.getElementsByTagName('img')).forEach(img => {
-                                                 img.src = '';
-                                             });
-
-                                             // 清空特定的脚本 src 属性
-                                             const scriptKeywords = ['login', 'index', 'daohang', 'grey', 'jquery'];
-                                             Array.from(document.getElementsByTagName('script')).forEach(script => {
-                                                 if (scriptKeywords.some(keyword => script.src.includes(keyword))) {
-                                                     script.src = '';
-                                                 }
-                                             });
-
-                                             // 清空具有特定 class 的 div 内容
-                                             const classNames = ['newmap', 'newtopbz', 'newtopbzTV', 'column_wrapper'];
-                                             classNames.forEach(className => {
-                                                 Array.from(document.getElementsByClassName(className)).forEach(div => {
-                                                     div.innerHTML = '';
-                                                 });
-                                             });
-
-                                             // 递归调用 FastLoading，每 4ms 触发一次
-                                             setTimeout(FastLoading, 4);
-                                         }
-
-                                         FastLoading();
-
-                                """,
-                        value -> {
-                        });
-                super.onPageStarted(view, url, favicon);
-            }
-
-            // 设置 WebViewClient，监听页面加载完成事件
-            @Override
-            public void onPageFinished(WebView view, String url) {
-                if (Objects.equals(url, "about:blank")) {
-                    return;
-                }
-                // 清空info
-                info = "";
-
-                if (currentLiveIndex <= 19) {
-                    // 获取节目预告和当前节目
-                    view.evaluateJavascript("document.querySelector('#jiemu > li.cur.act').innerText", value -> {
-                        // 处理获取到的元素值
-                        if (!value.equals("null") && !value.isEmpty()) {
-                            String elementValueNow = value.replace("\"", ""); // 去掉可能的引号
-                            info += elementValueNow + "\n";
+        FrameLayout container = findViewById(R.id.webViewContainer);
+        playback = new ChannelPlayback(container, enableDualWebView, canLoadX5,
+                new ChannelPlayback.Listener() {
+                    @Override
+                    public void onLoading(boolean hasPreviousChannel) {
+                        hideChannelOverlay();
+                        loadingOverlay.setVisibility(hasPreviousChannel ? View.GONE : View.VISIBLE);
+                        if (hasPreviousChannel) {
+                            showOverlay(channelNames[currentLiveIndex] + "\n正在切换频道…");
                         }
-                    });
-                    view.evaluateJavascript("document.querySelector('#jiemu > li:nth-child(4)').innerText", value -> {
-                        // 处理获取到的元素值
-                        if (!value.equals("null") && !value.isEmpty()) {
-                            String elementValueNext = value.replace("\"", ""); // 去掉可能的引号
-                            info += elementValueNext;
-                        }
-                    });
-                } else if (currentLiveIndex <= 40) {
-                    // 获取当前节目
-                    view.evaluateJavascript(
-                            "document.getElementsByClassName(\"tvSelectJiemu\")[0].innerHTML + \" \" + document.getElementsByClassName(\"tvSelectJiemu\")[1].innerHTML",
-                            value -> {
-                                if (!value.equals("null") && !value.isEmpty()) {
-                                    String elementValueNow = value.replace("\"", ""); // 去掉可能的引号
-                                    info += elementValueNow;
-                                }
-                            });
-                }
-                view.evaluateJavascript(
-                        """
-
-                                     function AutoFullscreen(){
-                                         var fullscreenBtn = document.querySelector('#player_pagefullscreen_yes_player')||document.querySelector('.videoFull');
-                                         if(fullscreenBtn!=null){
-                                            //alert(fullscreenBtn)
-                                          fullscreenBtn.click();
-                                          document.querySelector('video').volume=1;
-                                         }else{
-                                             setTimeout(
-                                                ()=>{ AutoFullscreen();}
-                                            ,16);
-                                         }
-                                     }
-                                AutoFullscreen()
-                                """,
-                        value -> {
-                        });
-                new Handler().postDelayed(() -> {
-                    // // 模拟触摸
-                    // if (!canLoadX5) {
-                    // simulateTouch(view, 0.5f, 0.5f);
-                    // }
-                    // 隐藏加载的 View
-                    loadingOverlay.setVisibility(View.GONE);
-                    webView0.setVisibility(View.VISIBLE);
-                    webView1.setVisibility(View.GONE);
-                    webView1.loadUrl("about:blank");
-
-                    isChanging = false;
-
-                    // 显示覆盖层，传入当前频道信息
-                    showOverlay(channelNames[currentLiveIndex] + "\n" + info);
-                }, 500);
-            }
-        });
-
-        webView1.setWebViewClient(new WebViewClient() {
-            // X5内核代码
-            @Override
-            public void onReceivedSslError(com.tencent.smtt.sdk.WebView webView,
-                    com.tencent.smtt.export.external.interfaces.SslErrorHandler handler,
-                    com.tencent.smtt.export.external.interfaces.SslError error) {
-                handler.proceed(); // 忽略 SSL 错误
-            }
-
-            // 系统Webview内核代码
-            // @Override
-            // public void onReceivedSslError(WebView view, SslErrorHandler handler,
-            // SslError error) {
-            // handler.proceed(); // 忽略 SSL 错误
-            // }
-
-            @Override
-            public void onPageStarted(WebView view, String url, Bitmap favicon) {
-                // 页面加载时执行 JavaScript 脚本
-                view.evaluateJavascript(
-                        """
-                                function FastLoading() {
-                                             const fullscreenBtn = document.querySelector('#player_pagefullscreen_yes_player') || document.querySelector('.videoFull');
-                                             if (fullscreenBtn) return;
-
-                                             // 清空所有图片的 src 属性，阻止图片加载
-                                             Array.from(document.getElementsByTagName('img')).forEach(img => {
-                                                 img.src = '';
-                                             });
-
-                                             // 清空特定的脚本 src 属性
-                                             const scriptKeywords = ['login', 'index', 'daohang', 'grey', 'jquery'];
-                                             Array.from(document.getElementsByTagName('script')).forEach(script => {
-                                                 if (scriptKeywords.some(keyword => script.src.includes(keyword))) {
-                                                     script.src = '';
-                                                 }
-                                             });
-
-                                             // 清空具有特定 class 的 div 内容
-                                             const classNames = ['newmap', 'newtopbz', 'newtopbzTV', 'column_wrapper'];
-                                             classNames.forEach(className => {
-                                                 Array.from(document.getElementsByClassName(className)).forEach(div => {
-                                                     div.innerHTML = '';
-                                                 });
-                                             });
-
-                                             // 递归调用 FastLoading，每 4ms 触发一次
-                                             setTimeout(FastLoading, 4);
-                                         }
-
-                                         FastLoading();
-
-                                """,
-                        value -> {
-                        });
-                super.onPageStarted(view, url, favicon);
-            }
-
-            // 设置 WebViewClient，监听页面加载完成事件
-            @Override
-            public void onPageFinished(WebView view, String url) {
-                if (Objects.equals(url, "about:blank")) {
-                    return;
-                }
-                // 清空info
-                info = "";
-
-                if (currentLiveIndex <= 19) {
-                    // 获取节目预告和当前节目
-                    view.evaluateJavascript("document.querySelector('#jiemu > li.cur.act').innerText", value -> {
-                        // 处理获取到的元素值
-                        if (!value.equals("null") && !value.isEmpty()) {
-                            String elementValueNow = value.replace("\"", ""); // 去掉可能的引号
-                            info += elementValueNow + "\n";
-                        }
-                    });
-                    view.evaluateJavascript("document.querySelector('#jiemu > li:nth-child(4)').innerText", value -> {
-                        // 处理获取到的元素值
-                        if (!value.equals("null") && !value.isEmpty()) {
-                            String elementValueNext = value.replace("\"", ""); // 去掉可能的引号
-                            info += elementValueNext;
-                        }
-                    });
-                } else if (currentLiveIndex <= 40) {
-                    // 获取当前节目
-                    view.evaluateJavascript(
-                            "document.getElementsByClassName(\"tvSelectJiemu\")[0].innerHTML + \" \" + document.getElementsByClassName(\"tvSelectJiemu\")[1].innerHTML",
-                            value -> {
-                                if (!value.equals("null") && !value.isEmpty()) {
-                                    String elementValueNow = value.replace("\"", ""); // 去掉可能的引号
-                                    info += elementValueNow;
-                                }
-                            });
-                }
-                view.evaluateJavascript(
-                        """
-
-                                     function AutoFullscreen(){
-                                         var fullscreenBtn = document.querySelector('#player_pagefullscreen_yes_player')||document.querySelector('.videoFull');
-                                         if(fullscreenBtn!=null){
-                                            //alert(fullscreenBtn)
-                                          fullscreenBtn.click();
-                                          document.querySelector('video').volume=1;
-                                         }else{
-                                             setTimeout(
-                                                ()=>{ AutoFullscreen();}
-                                            ,16);
-                                         }
-                                     }
-                                AutoFullscreen()
-                                """,
-                        value -> {
-                        });
-                new Handler().postDelayed(() -> {
-                    // // 模拟触摸
-                    // if (!canLoadX5) {
-                    // simulateTouch(view, 0.5f, 0.5f);
-                    // }
-                    // 隐藏加载的 View
-                    loadingOverlay.setVisibility(View.GONE);
-
-                    if (enableDualWebView) {
-                        webView1.setVisibility(View.VISIBLE);
-                        webView0.setVisibility(View.GONE);
-                        webView0.loadUrl("about:blank");
                     }
 
-                    isChanging = false;
+                    @Override
+                    public void onReady(int channelIndex, String programme) {
+                        loadingOverlay.setVisibility(View.GONE);
+                        saveCurrentLiveIndex();
+                        showOverlay(channelNames[channelIndex] + "\n" + programme);
+                    }
 
-                    // 显示覆盖层，传入当前频道信息
-                    showOverlay(channelNames[currentLiveIndex] + "\n" + info);
-                }, 1000);
-            }
-        });
-
-        // 禁用缩放
-        webSettings.setSupportZoom(false);
-        webSettings.setBuiltInZoomControls(false);
-        webSettings.setDisplayZoomControls(false);
-        webSettings1.setSupportZoom(false);
-        webSettings1.setBuiltInZoomControls(false);
-        webSettings1.setDisplayZoomControls(false);
-
-        // 在 Android TV 上，需要禁用焦点自动导航
-        webView0.setFocusable(false);
-        webView1.setFocusable(false);
-
-        // 开启无图（X5内核）
-        if (canLoadX5) {
-            webView0.getSettingsExtension().setPicModel(IX5WebSettingsExtension.PicModel_NoPic);
-            webView1.getSettingsExtension().setPicModel(IX5WebSettingsExtension.PicModel_NoPic);
-        }
-        // 设置 WebView 客户端
-        webView0.setWebChromeClient(new WebChromeClient());
-        webView1.setWebChromeClient(new WebChromeClient());
-
-        // 按照设置关闭双缓冲
-        if (!enableDualWebView) {
-            webView0.destroy();
-        }
-
-        // 加载上次保存的位置
+                    @Override
+                    public void onFailure(int channelIndex, String reason) {
+                        loadingOverlay.setVisibility(View.GONE);
+                        showOverlay(channelNames[channelIndex] + "\n" + reason
+                                + "\n可换台，或按菜单键后选择刷新重试");
+                    }
+                });
         loadLastLiveIndex();
-
-        // 启动定时任务，每隔一定时间执行一次
-        // startPeriodicTask();
-
     }
 
-    // 启动自动播放定时任务
-    private void startPeriodicTask() {
-        // 使用 postDelayed 方法设置定时任务
-        handler.postDelayed(periodicTask, 2000); // 2000 毫秒，即 2 秒钟
-    }
+    private boolean prepareWebViewKernel(SharedPreferences preferences) {
+        HashMap<String, Object> settings = new HashMap<>(2);
+        settings.put(TbsCoreSettings.TBS_SETTINGS_USE_SPEEDY_CLASSLOADER, true);
+        settings.put(TbsCoreSettings.TBS_SETTINGS_USE_DEXLOADER_SERVICE, true);
+        QbSdk.initTbsSettings(settings);
 
-    // 定时任务具体操作
-    private final Runnable periodicTask = new Runnable() {
-        @Override
-        public void run() {
-            // 获取 div 元素的 display 属性，并执行相应的操作
-            getDivDisplayPropertyAndDoSimulateTouch();
-
-            // 完成后再次调度定时任务
-            handler.postDelayed(this, 2000); // 2000 毫秒，即 2 秒钟
+        if (preferences.getBoolean(KernelFallback.INSTALL_IN_PROGRESS, false)) {
+            KernelFallback.preferSystem(preferences);
+            Toast.makeText(this, R.string.x5_install_interrupted, Toast.LENGTH_LONG).show();
         }
-    };
+        if (preferences.getBoolean(KernelFallback.SYSTEM_WEBVIEW, true)) {
+            QbSdk.forceSysWebView();
+            return false;
+        }
 
-    // 获取 div 元素的 display 属性并执行相应的操作
-    private void getDivDisplayPropertyAndDoSimulateTouch() {
-        if (webView0 != null) {
-            if (currentLiveIndex <= 19) {
-                webView0.evaluateJavascript("document.getElementById('play_or_pause_play_player').style.display",
-                        value -> {
-                            // 处理获取到的 display 属性值
-                            if (value.equals("\"block\"")) {
-                                // 执行点击操作
-                                simulateTouch(webView0, 0.5f, 0.5f);
-                            }
-                        });
-            } else if (currentLiveIndex <= 40) {
-                String scriptPlay = """
-                        try{
-                        if(document.querySelector('.voice.on').style.display == 'none'){
-                            document.querySelector('.voice.on').click();
-                        }
-                        document.querySelector('.play.play1').click();
-                        } catch(e) {
-                        }
-                        """;
-                webView0.evaluateJavascript(scriptPlay, null);
+        try {
+            QbSdk.unForceSysWebView();
+            if (QbSdk.canLoadX5(getApplicationContext())) {
+                return true;
             }
+        } catch (RuntimeException | LinkageError error) {
+            Log.w("MainActivity", "Could not initialize the X5 kernel", error);
+            KernelFallback.preferSystem(preferences);
+            QbSdk.forceSysWebView();
+            Toast.makeText(this, R.string.x5_install_failed, Toast.LENGTH_LONG).show();
+            return false;
         }
+
+        startActivity(new Intent(this, LoadingActivity.class));
+        finish();
+        return false;
     }
 
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
+        if (playback == null) {
+            return super.dispatchKeyEvent(event);
+        }
         if (event.getAction() == KeyEvent.ACTION_DOWN) {
             if (event.getKeyCode() == KeyEvent.KEYCODE_VOLUME_UP) {
                 audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_RAISE,
@@ -759,14 +391,17 @@ public class MainActivity extends AppCompatActivity {
                     switch (menuOverlaySelectedIndex) {
                         case 0:
                             // 刷新页面
-                            getCurrentWebview().reload();
+                            loadLiveUrl();
                             showMenuOverlay();
                             break;
                         case 1:
                             // 播放
-                            if (currentLiveIndex <= 19) {
-                                simulateTouch(getCurrentWebview(), 0.5f, 0.5f);
-                            } else if (currentLiveIndex <= 40) {
+                            if (playback.activeView() == null) {
+                                break;
+                            }
+                            if (playback.activeChannel() <= 19) {
+                                simulateTouch(playback.activeView(), 0.5f, 0.5f);
+                            } else {
                                 String scriptPause = """
                                         try{
                                         document.querySelector('.play.play2').click();
@@ -774,7 +409,7 @@ public class MainActivity extends AppCompatActivity {
                                         document.querySelector('.play.play1').click();
                                         }
                                         """;
-                                getCurrentWebview().evaluateJavascript(scriptPause, null);
+                                playback.activeView().evaluateJavascript(scriptPause, null);
                             }
                             showMenuOverlay();
                             break;
@@ -794,12 +429,9 @@ public class MainActivity extends AppCompatActivity {
                                     }
                                     """;
 
-                            if (currentLiveIndex <= 19) {
-                                getCurrentWebview().evaluateJavascript(script1, null);
-                            } else if (currentLiveIndex <= 40) {
-                                new Handler().postDelayed(() -> {
-                                    getCurrentWebview().evaluateJavascript(script2, null);
-                                }, 500);
+                            if (playback.activeView() != null) {
+                                playback.activeView().evaluateJavascript(
+                                        playback.activeChannel() <= 19 ? script1 : script2, null);
                             }
                             break;
                         case 3:
@@ -823,7 +455,9 @@ public class MainActivity extends AppCompatActivity {
 
                                     zoomIn();
                                     """;
-                            getCurrentWebview().evaluateJavascript(scriptZoomIn, null);
+                            if (playback.activeView() != null) {
+                                playback.activeView().evaluateJavascript(scriptZoomIn, null);
+                            }
                             break;
                         case 4:
                             // 缩小
@@ -848,7 +482,9 @@ public class MainActivity extends AppCompatActivity {
 
                                     zoomOut();
                                     """;
-                            getCurrentWebview().evaluateJavascript(scriptZoomOut, null);
+                            if (playback.activeView() != null) {
+                                playback.activeView().evaluateJavascript(scriptZoomOut, null);
+                            }
                             break;
                         case 5:
                             // 打开设置
@@ -960,7 +596,6 @@ public class MainActivity extends AppCompatActivity {
                     // 中间键,执行按钮操作
                     currentLiveIndex = SubMenuCCTVSelectedIndex;
                     loadLiveUrl();
-                    saveCurrentLiveIndex();
                     showChannelList();
                     return true;
                 }
@@ -1007,58 +642,56 @@ public class MainActivity extends AppCompatActivity {
                     // 中间键,执行按钮操作
                     currentLiveIndex = SubMenuLocalSelectedIndex + 20;
                     loadLiveUrl();
-                    saveCurrentLiveIndex();
                     showChannelList();
                     return true;
                 }
             } else if (DrawerLayoutDetailed.hasFocus()) {
                 return true;
-            } else if (event.getKeyCode() == KeyEvent.KEYCODE_DPAD_UP && !isChanging) {
+            } else if (event.getKeyCode() == KeyEvent.KEYCODE_DPAD_UP) {
                 // 执行上一个直播地址的操作
                 navigateToPreviousLive();
                 return true; // 返回 true 表示事件已处理，不传递给 WebView
-            } else if (event.getKeyCode() == KeyEvent.KEYCODE_DPAD_DOWN && !isChanging) {
+            } else if (event.getKeyCode() == KeyEvent.KEYCODE_DPAD_DOWN) {
                 // 执行下一个直播地址的操作
                 navigateToNextLive();
                 return true; // 返回 true 表示事件已处理，不传递给 WebView
             } else if ((event.getKeyCode() == KeyEvent.KEYCODE_ENTER
-                    || event.getKeyCode() == KeyEvent.KEYCODE_DPAD_CENTER) && !isChanging) {
+                    || event.getKeyCode() == KeyEvent.KEYCODE_DPAD_CENTER)) {
                 // 换台菜单
                 showChannelList();
                 // 显示节目列表
-                showOverlay(channelNames[currentLiveIndex] + "\n" + info);
+                int active = playback.activeChannel();
+                if (active >= 0) {
+                    showOverlay(channelNames[active] + "\n" + playback.activeProgramme());
+                }
                 return true; // 返回 true 表示事件已处理，不传递给 WebView
-            } else if ((event.getKeyCode() == KeyEvent.KEYCODE_MENU || event.getKeyCode() == KeyEvent.KEYCODE_M)
-                    && !isChanging) {
+            } else if (event.getKeyCode() == KeyEvent.KEYCODE_MENU
+                    || event.getKeyCode() == KeyEvent.KEYCODE_M) {
                 // 显示菜单
                 showMenuOverlay();
 
                 return true; // 返回 true 表示事件已处理，不传递给 WebView
-            } else if ((event.getKeyCode() >= KeyEvent.KEYCODE_0 && event.getKeyCode() <= KeyEvent.KEYCODE_9)
-                    && !isChanging) {
-                int numericKey = event.getKeyCode() - KeyEvent.KEYCODE_0;
-
-                // 将按下的数字键追加到缓冲区
-                digitBuffer.append(numericKey);
-
-                // 使用 Handler 来在超时后处理输入的数字
-                new Handler().postDelayed(() -> handleNumericInput(), DIGIT_TIMEOUT);
-
-                // 更新显示正在输入的数字的 TextView
-                updateInputTextView();
+            } else if (event.getKeyCode() >= KeyEvent.KEYCODE_0
+                    && event.getKeyCode() <= KeyEvent.KEYCODE_9) {
+                if (event.getRepeatCount() == 0
+                        && digitBuffer.length() < String.valueOf(liveUrls.length).length()) {
+                    digitBuffer.append(event.getKeyCode() - KeyEvent.KEYCODE_0);
+                    handler.removeCallbacks(submitDigits);
+                    handler.postDelayed(submitDigits, DIGIT_TIMEOUT);
+                    updateInputTextView();
+                }
 
                 return true; // 事件已处理，不传递给 WebView
             } else if (event.getKeyCode() == KeyEvent.KEYCODE_BACK || event.getKeyCode() == KeyEvent.KEYCODE_B) {
                 if (doubleBackToExitPressedOnce) {
-                    super.onBackPressed();
-                    System.exit(0);
+                    finish();
                     return true;
                 }
 
                 this.doubleBackToExitPressedOnce = true;
                 Toast.makeText(this, "再按一次返回键退出应用", Toast.LENGTH_SHORT).show();
 
-                new Handler().postDelayed(() -> doubleBackToExitPressedOnce = false, 2000);
+                handler.postDelayed(() -> doubleBackToExitPressedOnce = false, 2000);
                 // 如果两秒内再次按返回键，则退出应用
             }
         }
@@ -1068,8 +701,8 @@ public class MainActivity extends AppCompatActivity {
     // 显示底部菜单
     private void showMenuOverlay() {
         if (!isMenuOverlayVisible) {
-            menuOverlay.getChildAt(menuOverlaySelectedIndex).requestFocus();
             menuOverlay.setVisibility(View.VISIBLE);
+            menuOverlay.getChildAt(menuOverlaySelectedIndex).requestFocus();
             isMenuOverlayVisible = true;
         } else {
             menuOverlay.setVisibility(View.GONE);
@@ -1140,22 +773,25 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void handleNumericInput() {
-        // 将缓冲区中的数字转换为整数
-        if (digitBuffer.length() > 0) {
-            int numericValue = Integer.parseInt(digitBuffer.toString());
+        if (digitBuffer.length() == 0) {
+            return;
+        }
 
-            // 检查数字是否在有效范围内
-            if (numericValue > 0 && numericValue <= liveUrls.length) {
-                currentLiveIndex = numericValue - 1;
-                loadLiveUrl();
-                saveCurrentLiveIndex(); // 保存当前位置
-            }
+        int number = Integer.parseInt(digitBuffer.toString());
+        clearNumericInput();
+        if (number > 0 && number <= liveUrls.length) {
+            currentLiveIndex = number - 1;
+            loadLiveUrl();
+        } else {
+            showOverlay("频道号无效");
+        }
+    }
 
-            // 重置缓冲区
-            digitBuffer.setLength(0);
-
-            // 取消显示正在输入的数字
-            inputTextView.setVisibility(View.INVISIBLE);
+    private void clearNumericInput() {
+        handler.removeCallbacks(submitDigits);
+        digitBuffer.setLength(0);
+        if (inputTextView != null) {
+            inputTextView.setVisibility(View.GONE);
         }
     }
 
@@ -1167,62 +803,27 @@ public class MainActivity extends AppCompatActivity {
 
     private void loadLastLiveIndex() {
         SharedPreferences preferences = getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
-        currentLiveIndex = preferences.getInt(PREF_KEY_LIVE_INDEX, 0); // 默认值为0
-        loadLiveUrl(); // 加载上次保存的位置的直播地址
+        int savedIndex = preferences.getInt(PREF_KEY_LIVE_INDEX, 0);
+        currentLiveIndex = savedIndex >= 0 && savedIndex < liveUrls.length ? savedIndex : 0;
+        loadLiveUrl();
     }
 
     private void saveCurrentLiveIndex() {
         SharedPreferences preferences = getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
         SharedPreferences.Editor editor = preferences.edit();
-        editor.putInt(PREF_KEY_LIVE_INDEX, currentLiveIndex);
+        editor.putInt(PREF_KEY_LIVE_INDEX, playback.activeChannel());
         editor.apply();
     }
 
-    private WebView getCurrentWebview() {
-        if (!enableDualWebView) {
-            return webView1;
-        }
-        if (currentWebView == 0) {
-            return webView0;
-        } else {
-            return webView1;
-        }
-    }
-
     private void loadLiveUrl() {
-        if (currentLiveIndex >= 0 && currentLiveIndex < liveUrls.length) {
-            // 显示加载的View
-            loadingOverlay.setVisibility(View.VISIBLE);
-
-            isChanging = true;
-
-            if (currentWebView == 0) {
-                currentWebView = 1;
-            } else {
-                currentWebView = 0;
-            }
-
-            getCurrentWebview().setInitialScale(getMinimumScale());
-            getCurrentWebview().loadUrl(liveUrls[currentLiveIndex]);
-            if (currentLiveIndex > 19) {
-                new Handler().postDelayed(new Runnable() {
-                    @Override
-                    public void run() {
-                        if (getCurrentWebview() != null) {
-                            getCurrentWebview().setInitialScale(getMinimumScale());
-                            getCurrentWebview().reload();
-                        }
-                    }
-                }, 1000);
-            }
-        }
+        clearNumericInput();
+        playback.load(currentLiveIndex, liveUrls[currentLiveIndex], currentLiveIndex < 20);
     }
 
     private void navigateToPreviousLive() {
         if (enableDirectChannelChange) {
             currentLiveIndex = (currentLiveIndex - 1 + liveUrls.length) % liveUrls.length;
             loadLiveUrl();
-            saveCurrentLiveIndex(); // 保存当前位置
         } else {
             showChannelListDPAD((currentLiveIndex - 1 + liveUrls.length) % liveUrls.length);
         }
@@ -1232,24 +833,9 @@ public class MainActivity extends AppCompatActivity {
         if (enableDirectChannelChange) {
             currentLiveIndex = (currentLiveIndex + 1 + liveUrls.length) % liveUrls.length;
             loadLiveUrl();
-            saveCurrentLiveIndex(); // 保存当前位置
         } else {
             showChannelListDPAD((currentLiveIndex + 1 + liveUrls.length) % liveUrls.length);
         }
-    }
-
-    private int getMinimumScale() {
-        DisplayMetrics displayMetrics = new DisplayMetrics();
-        getWindowManager().getDefaultDisplay().getMetrics(displayMetrics);
-        int screenWidth = displayMetrics.widthPixels;
-        int screenHeight = displayMetrics.heightPixels;
-
-        // 计算缩放比例，使用 double 类型进行计算
-        double scale = Math.min((double) screenWidth / 1920.0, (double) screenHeight / 1080.0) * 100;
-
-        Log.d("scale", "scale: " + scale);
-        // 四舍五入并转为整数
-        return (int) Math.round(scale);
     }
 
     // 在需要模拟触摸的地方调用该方法
@@ -1271,25 +857,39 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void showOverlay(String channelInfo) {
-        // 设置覆盖层内容
         overlayTextView.setText(channelInfo);
+        overlayTextView.setVisibility(View.VISIBLE);
+        handler.removeCallbacks(hideOverlay);
+        handler.postDelayed(hideOverlay, 8000);
+    }
 
-        findViewById(R.id.overlayTextView).setVisibility(View.VISIBLE);
+    private void hideChannelOverlay() {
+        handler.removeCallbacks(hideOverlay);
+        hideOverlay.run();
+    }
 
-        // 使用 Handler 延时隐藏覆盖层
-        new Handler().postDelayed(() -> {
-            findViewById(R.id.overlayTextView).setVisibility(View.GONE);
-        }, 8000);
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (playback != null) {
+            playback.resume();
+        }
+    }
+
+    @Override
+    protected void onPause() {
+        clearNumericInput();
+        if (playback != null) {
+            playback.pause();
+        }
+        super.onPause();
     }
 
     @Override
     protected void onDestroy() {
-        // 在销毁活动时，释放 WebView 资源
-        if (webView0 != null) {
-            webView0.destroy();
-        }
-        if (webView1 != null) {
-            webView1.destroy();
+        handler.removeCallbacksAndMessages(null);
+        if (playback != null) {
+            playback.close();
         }
         super.onDestroy();
     }

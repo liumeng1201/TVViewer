@@ -22,12 +22,15 @@ import androidx.appcompat.app.AppCompatActivity;
 public class DownloadActivity extends AppCompatActivity {
 
     private DownloadManager downloadManager;
+    private static final long DOWNLOAD_TIMEOUT_MS = 5 * 60 * 1000L;
     private long downloadId;
     private ProgressBar progressBar;
     private TextView downloadStatus;
     private Button retryButton;
     private Handler handler;
     private volatile boolean isDestroyed = false;
+    private boolean completed;
+    private final Runnable onTimeout = () -> returnToSystem(R.string.x5_install_timeout);
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -41,6 +44,7 @@ public class DownloadActivity extends AppCompatActivity {
 
         String fileUrl = getIntent().getStringExtra("file_url");
         startDownload(fileUrl);
+        findViewById(R.id.useSystemWebView).setOnClickListener(v -> onBackPressed());
 
         // 注册广播接收器
         registerReceiver(onDownloadComplete, new IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE));
@@ -76,6 +80,8 @@ public class DownloadActivity extends AppCompatActivity {
             return;
         }
 
+        handler.removeCallbacks(onTimeout);
+        handler.postDelayed(onTimeout, DOWNLOAD_TIMEOUT_MS);
         new Thread(() -> {
             boolean downloading = true;
             while (downloading && !isDestroyed) {
@@ -103,7 +109,12 @@ public class DownloadActivity extends AppCompatActivity {
                     if (status == DownloadManager.STATUS_SUCCESSFUL) {
                         downloading = false;
                         handler.post(() -> {
-                            if (!isDestroyed) downloadStatus.setText("下载完成");
+                            if (isDestroyed || completed || isFinishing()) {
+                                return;
+                            }
+                            completed = true;
+                            handler.removeCallbacks(onTimeout);
+                            downloadStatus.setText("下载完成");
                             Intent intent = new Intent(DownloadActivity.this, LoadingActivity.class);
                             startActivity(intent);
                             finish();
@@ -111,7 +122,8 @@ public class DownloadActivity extends AppCompatActivity {
                     } else if (status == DownloadManager.STATUS_FAILED) {
                         downloading = false;
                         handler.post(() -> {
-                            if (!isDestroyed) {
+                            if (!isDestroyed && !completed) {
+                                handler.removeCallbacks(onTimeout);
                                 downloadStatus.setText("下载失败");
                                 retryButton.setVisibility(View.VISIBLE);
                             }
@@ -139,6 +151,22 @@ public class DownloadActivity extends AppCompatActivity {
             }
         }
     };
+
+    @Override
+    public void onBackPressed() {
+        returnToSystem(R.string.x5_install_cancelled);
+    }
+
+    private void returnToSystem(int message) {
+        if (!completed && !isDestroyed && !isFinishing()) {
+            completed = true;
+            handler.removeCallbacks(onTimeout);
+            if (downloadManager != null && downloadId != 0) {
+                downloadManager.remove(downloadId);
+            }
+            KernelFallback.returnToPlayback(this, message);
+        }
+    }
 
     @Override
     protected void onDestroy() {

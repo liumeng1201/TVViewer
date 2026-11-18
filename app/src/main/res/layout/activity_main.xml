@@ -13,31 +13,8 @@
         android:layout_height="match_parent"
         android:descendantFocusability="blocksDescendants">
 
-        <com.tencent.smtt.sdk.WebView
-            android:id="@+id/webView0"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:visibility="gone" />
-
-        <com.tencent.smtt.sdk.WebView
-            android:id="@+id/webView1"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent" />
-
     </FrameLayout>
 
-
-    <TextView
-        android:id="@+id/inputTextView"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_alignTop="@id/webViewContainer"
-        android:layout_alignStart="@id/webViewContainer"
-        android:layout_marginStart="16dp"
-        android:layout_marginTop="16dp"
-        android:textSize="48sp"
-        android:textColor="#FFFFFF"
-        android:background="#80000000"/>
 
     <TextView
         android:id="@+id/overlayTextView"
@@ -83,6 +60,18 @@
             android:textSize="20sp" />
 
     </RelativeLayout>
+
+    <TextView
+        android:id="@+id/inputTextView"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_alignTop="@id/webViewContainer"
+        android:layout_alignStart="@id/webViewContainer"
+        android:layout_marginStart="16dp"
+        android:layout_marginTop="16dp"
+        android:textSize="48sp"
+        android:textColor="#FFFFFF"
+        android:background="#80000000"/>
 
     <LinearLayout
         android:id="@+id/menuOverlay"

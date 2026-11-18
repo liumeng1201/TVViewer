@@ -12,6 +12,7 @@ android {
         targetSdk 28
         versionCode 24
         versionName "1.8.0"
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         ndk{abiFilters "armeabi", "armeabi-v7a", "x86"}
         multiDexEnabled true
     }
@@ -39,4 +40,7 @@ dependencies {
     implementation files('libs/tbs_sdk_thirdapp_v4.3.0.253_44153_sharewithdownloadwithfile_withoutGame_obfs_20220117_105333.jar')
     implementation 'androidx.preference:preference:1.2.1'
     implementation 'androidx.multidex:multidex:2.0.1'
+    androidTestImplementation 'androidx.test:core:1.5.0'
+    androidTestImplementation 'androidx.test:runner:1.5.2'
+    androidTestImplementation 'androidx.test.ext:junit:1.1.5'
 }
