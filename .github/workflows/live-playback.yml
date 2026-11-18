@@ -18,10 +18,10 @@ jobs:
     timeout-minutes: 25
     env:
       STARTUP_SECONDS: ${{ inputs.startup_seconds }}
-      PLAYBACK_REPORT_DIR: ${{ runner.temp }}/tvviewer-live-playback
     steps:
-      - name: Validate first-frame timeout
+      - name: Prepare playback report directory and validate the timeout
         run: |
+          echo "PLAYBACK_REPORT_DIR=$RUNNER_TEMP/tvviewer-live-playback" >> "$GITHUB_ENV"
           if [[ ! "$STARTUP_SECONDS" =~ ^[0-9]{2,3}$ ]] ||
              (( 10#$STARTUP_SECONDS < 20 || 10#$STARTUP_SECONDS > 180 )); then
             echo "::error::startup_seconds must be an integer between 20 and 180"
