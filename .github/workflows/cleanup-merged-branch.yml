@@ -1,0 +1,64 @@
+name: Clean up merged PR branch
+
+on:
+  pull_request_target:
+    types: [closed]
+    branches: [master]
+
+permissions: {}
+
+jobs:
+  cleanup:
+    if: >-
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref != 'master'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      pull-requests: read
+    steps:
+      - name: Check out the trusted base branch
+        uses: actions/checkout@v6
+        with:
+          ref: refs/heads/master
+
+      - name: Delete the merged head branch if still unused
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          HEAD_BRANCH: ${{ github.event.pull_request.head.ref }}
+          MERGED_HEAD: ${{ github.event.pull_request.head.sha }}
+        shell: bash
+        run: |
+          branch_ref="refs/heads/$HEAD_BRANCH"
+          git check-ref-format "$branch_ref"
+
+          if remote_ref=$(git ls-remote --exit-code origin "$branch_ref"); then
+            read -r remote_sha _ <<< "$remote_ref"
+          else
+            status=$?
+            if [[ $status == 2 ]]; then
+              echo "Branch was already deleted."
+              exit 0
+            fi
+            exit "$status"
+          fi
+
+          if [[ $remote_sha != "$MERGED_HEAD" ]]; then
+            echo "Branch moved since the merge. Keeping it."
+            exit 0
+          fi
+
+          open_pulls=$(gh api --paginate --slurp "repos/$GH_REPO/pulls?state=open&per_page=100")
+          branch_in_use=$(jq --arg branch "$HEAD_BRANCH" --arg repo "$GH_REPO" '
+            any(.[][]; (.head.repo.full_name == $repo and .head.ref == $branch) or
+                        (.base.repo.full_name == $repo and .base.ref == $branch))
+          ' <<< "$open_pulls")
+          if [[ $branch_in_use == true ]]; then
+            echo "An open pull request still uses the branch. Keeping it."
+            exit 0
+          fi
+
+          git push --force-with-lease="$branch_ref:$MERGED_HEAD" origin ":$branch_ref"
