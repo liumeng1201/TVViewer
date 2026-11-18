@@ -1,0 +1,83 @@
+name: Live Playback Smoke Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      startup_seconds:
+        description: Max wait for the first frame per channel (20–180 seconds)
+        type: number
+        default: 90
+
+permissions:
+  contents: read
+
+jobs:
+  live-playback:
+    name: Check CCTV and Yangshipin live playback
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      STARTUP_SECONDS: ${{ inputs.startup_seconds }}
+      PLAYBACK_REPORT_DIR: ${{ runner.temp }}/tvviewer-live-playback
+    steps:
+      - name: Validate first-frame timeout
+        run: |
+          if [[ ! "$STARTUP_SECONDS" =~ ^[0-9]{2,3}$ ]] ||
+             (( 10#$STARTUP_SECONDS < 20 || 10#$STARTUP_SECONDS > 180 )); then
+            echo "::error::startup_seconds must be an integer between 20 and 180"
+            exit 1
+          fi
+
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          java-version: '17'
+          distribution: temurin
+          cache: gradle
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Measure live playback in the Android emulator
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        with:
+          api-level: 30
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          script: bash .github/scripts/live-playback-smoke.sh
+
+      - name: Summarize playback measurements
+        if: always()
+        run: |
+          {
+            echo '## Playback results'
+            echo
+            echo '| Channel | Result | First frame (ms) | App ready (ms) | Playing (ms) | Stalls | Longest stall (ms) | Dropped frames |'
+            echo '| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |'
+            for source in control cctv yangshipin; do
+              report="$PLAYBACK_REPORT_DIR/$source.json"
+              if [[ -f "$report" ]]; then
+                jq -r '"| \(.channel) | \(.result) | \(.firstFrameMs // "—") | \(.appReadyMs // "—") | \(.playingMs // "—") | \(.stallCount // "—") | \(.longestStallMs // "—") | \(if .droppedFrameRatio != null then ((.droppedFrameRatio * 10000 | round) / 100 | tostring) + "%" else "—" end) |"' "$report"
+              else
+                echo "| $source | No report | — | — | — | — | — | — |"
+              fi
+            done
+            echo
+            echo "First-frame test budget is ${STARTUP_SECONDS}s. The released app waits up to 20s for its playback-ready signal."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload playback evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: live-playback-evidence
+          path: ${{ env.PLAYBACK_REPORT_DIR }}
+          if-no-files-found: warn
+          retention-days: 7

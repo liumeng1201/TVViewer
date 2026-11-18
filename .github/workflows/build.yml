@@ -108,7 +108,7 @@ jobs:
           - api: 30
             target: google_apis
             arch: x86_64
-            test_args: ''
+            test_args: -Pandroid.testInstrumentationRunnerArguments.notAnnotation=com.eanyatonic.cctvViewer.LivePlayback
           - api: 21
             target: default
             arch: x86
