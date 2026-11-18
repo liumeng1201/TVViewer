@@ -7,6 +7,7 @@ import android.app.Instrumentation;
 import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.Rect;
+import android.os.Bundle;
 import android.os.SystemClock;
 import android.util.Log;
 import android.widget.FrameLayout;
@@ -158,6 +159,15 @@ public class LivePlaybackSmokeTest {
             try (FileOutputStream file = new FileOutputStream(new File(output, id + ".json"))) {
                 file.write(report.toString(2).getBytes(java.nio.charset.StandardCharsets.UTF_8));
             }
+            Bundle status = new Bundle();
+            status.putString("tvviewerPlaybackSummary", new JSONObject(report, new String[]{
+                    "source", "channel", "url", "playbackPath", "result", "startupBudgetMs",
+                    "observationMs", "pageReadyMs", "videoElementMs", "firstFrameMs", "appReadyMs",
+                    "withinAppTimeout", "appReadyWithinDefaultTimeout", "frameEvidence",
+                    "playingMs", "stallCount", "longestStallMs", "droppedFrameRatio",
+                    "visibleVideoRegion", "appFailure", "exception"
+            }).toString());
+            instrumentation.sendStatus(2, status);
             Log.i(TAG, id + ": " + report.optString("result"));
         }
 
