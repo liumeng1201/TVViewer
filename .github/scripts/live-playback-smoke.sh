@@ -52,20 +52,18 @@ run_instrumentation() {
     grep -Eq "^[[:space:]]*OK \\($expected tests?\\)[[:space:]]*$" "$output"
 }
 
-if [[ "${COMPARE_DIRECT:-false}" != true ]]; then
+if [[ "$PLAYBACK_GROUP" == app ]]; then
     run_instrumentation "$test_class#probeDetectsLocallyRenderedVideo,$test_class#cctv1PlaysFromInternet,$test_class#beijingSatellitePlaysFromYangshipin" \
         3 "$report_dir/instrumentation.txt"
     exit
 fi
 
-methods=(
-    probeDetectsLocallyRenderedVideo
-    cctv1PlaysFromInternet
-    cctv1PlaysDirectly
-    beijingSatellitePlaysFromYangshipin
-    beijingSatellitePlaysDirectly
-    cctv1PlaysDirectlyFromYangshipin
-)
+case "$PLAYBACK_GROUP" in
+    cctv) methods=(cctv1PlaysFromInternet cctv1PlaysDirectly) ;;
+    yangshipin) methods=(beijingSatellitePlaysFromYangshipin beijingSatellitePlaysDirectly) ;;
+    alternate) methods=(probeDetectsLocallyRenderedVideo cctv1PlaysDirectlyFromYangshipin) ;;
+    *) echo "::error::Unknown playback comparison group: $PLAYBACK_GROUP"; exit 1 ;;
+esac
 failed=0
 for method in "${methods[@]}"; do
     # Each measurement starts with fresh WebView data on the same virtual device.

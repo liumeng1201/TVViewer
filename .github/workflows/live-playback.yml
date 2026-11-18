@@ -17,12 +17,16 @@ permissions:
 
 jobs:
   live-playback:
-    name: Check CCTV and Yangshipin live playback
+    name: Live playback (${{ matrix.group }})
     runs-on: ubuntu-24.04
     timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        group: ${{ fromJSON(inputs.compare_direct && '["cctv", "yangshipin", "alternate"]' || '["app"]') }}
     env:
       STARTUP_SECONDS: ${{ inputs.startup_seconds }}
-      COMPARE_DIRECT: ${{ inputs.compare_direct }}
+      PLAYBACK_GROUP: ${{ matrix.group }}
     steps:
       - name: Prepare playback report directory and validate the timeout
         run: |
@@ -66,10 +70,12 @@ jobs:
             echo
             echo '| Channel | Result | Page ready (ms) | Video element (ms) | First frame (ms) | App ready (ms) | Playing (ms) | Stalls | Longest stall (ms) | Dropped frames |'
             echo '| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |'
-            sources=(control cctv yangshipin)
-            if [[ "$COMPARE_DIRECT" == true ]]; then
-              sources=(control cctv cctv-direct yangshipin yangshipin-direct cctv-yangshipin-direct)
-            fi
+            case "$PLAYBACK_GROUP" in
+              cctv) sources=(cctv cctv-direct) ;;
+              yangshipin) sources=(yangshipin yangshipin-direct) ;;
+              alternate) sources=(control cctv-yangshipin-direct) ;;
+              *) sources=(control cctv yangshipin) ;;
+            esac
             for source in "${sources[@]}"; do
               report="$PLAYBACK_REPORT_DIR/$source.json"
               if [[ -f "$report" ]]; then
@@ -86,7 +92,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: live-playback-evidence
+          name: live-playback-evidence-${{ matrix.group }}
           path: ${{ env.PLAYBACK_REPORT_DIR }}
           if-no-files-found: warn
           retention-days: 7
