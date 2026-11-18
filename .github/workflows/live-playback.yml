@@ -7,6 +7,10 @@ on:
         description: Max wait for the first frame per channel (20–180 seconds)
         type: number
         default: 90
+      compare_direct:
+        description: Compare the app with direct page playback on the same emulator
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -18,6 +22,7 @@ jobs:
     timeout-minutes: 25
     env:
       STARTUP_SECONDS: ${{ inputs.startup_seconds }}
+      COMPARE_DIRECT: ${{ inputs.compare_direct }}
     steps:
       - name: Prepare playback report directory and validate the timeout
         run: |
@@ -59,14 +64,18 @@ jobs:
           {
             echo '## Playback results'
             echo
-            echo '| Channel | Result | First frame (ms) | App ready (ms) | Playing (ms) | Stalls | Longest stall (ms) | Dropped frames |'
-            echo '| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |'
-            for source in control cctv yangshipin; do
+            echo '| Channel | Result | Page ready (ms) | Video element (ms) | First frame (ms) | App ready (ms) | Playing (ms) | Stalls | Longest stall (ms) | Dropped frames |'
+            echo '| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |'
+            sources=(control cctv yangshipin)
+            if [[ "$COMPARE_DIRECT" == true ]]; then
+              sources=(control cctv cctv-direct yangshipin yangshipin-direct cctv-yangshipin-direct)
+            fi
+            for source in "${sources[@]}"; do
               report="$PLAYBACK_REPORT_DIR/$source.json"
               if [[ -f "$report" ]]; then
-                jq -r '"| \(.channel) | \(.result) | \(.firstFrameMs // "—") | \(.appReadyMs // "—") | \(.playingMs // "—") | \(.stallCount // "—") | \(.longestStallMs // "—") | \(if .droppedFrameRatio != null then ((.droppedFrameRatio * 10000 | round) / 100 | tostring) + "%" else "—" end) |"' "$report"
+                jq -r '"| \(.channel) | \(.result) | \(.pageReadyMs // "—") | \(.videoElementMs // "—") | \(.firstFrameMs // "—") | \(.appReadyMs // "—") | \(.playingMs // "—") | \(.stallCount // "—") | \(.longestStallMs // "—") | \(if .droppedFrameRatio != null then ((.droppedFrameRatio * 10000 | round) / 100 | tostring) + "%" else "—" end) |"' "$report"
               else
-                echo "| $source | No report | — | — | — | — | — | — |"
+                echo "| $source | No report | — | — | — | — | — | — | — | — |"
               fi
             done
             echo

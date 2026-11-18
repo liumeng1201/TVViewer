@@ -15,8 +15,13 @@ import androidx.test.core.app.ActivityScenario;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
 
+import com.tencent.smtt.export.external.interfaces.WebResourceError;
+import com.tencent.smtt.export.external.interfaces.WebResourceRequest;
+import com.tencent.smtt.export.external.interfaces.WebResourceResponse;
 import com.tencent.smtt.sdk.QbSdk;
+import com.tencent.smtt.sdk.WebSettings;
 import com.tencent.smtt.sdk.WebView;
+import com.tencent.smtt.sdk.WebViewClient;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -50,25 +55,54 @@ public class LivePlaybackSmokeTest {
     @Test
     @LivePlayback
     public void probeDetectsLocallyRenderedVideo() throws Exception {
-        verify("control", ChannelCatalog.byNumber(1), ChannelPlaybackTest.PLAYING, 12_000, 4_000);
+        verify("control", "Local control video", ChannelCatalog.byNumber(1),
+                ChannelPlaybackTest.PLAYING, 12_000, 4_000, false);
     }
 
     @Test
     @LivePlayback
     public void cctv1PlaysFromInternet() throws Exception {
         ChannelCatalog.Channel channel = ChannelCatalog.byNumber(1);
-        verify("cctv", channel, channel.url, startupBudgetMs(), OBSERVATION_MS);
+        verifyLive("cctv", channel.label(), channel, channel.url, false);
     }
 
     @Test
     @LivePlayback
     public void beijingSatellitePlaysFromYangshipin() throws Exception {
         ChannelCatalog.Channel channel = ChannelCatalog.byNumber(21);
-        verify("yangshipin", channel, channel.url, startupBudgetMs(), OBSERVATION_MS);
+        verifyLive("yangshipin", channel.label(), channel, channel.url, false);
     }
 
-    private void verify(String id, ChannelCatalog.Channel channel, String url,
-                        long startupMs, long observationMs) throws Exception {
+    @Test
+    @LivePlayback
+    public void cctv1PlaysDirectly() throws Exception {
+        ChannelCatalog.Channel channel = ChannelCatalog.byNumber(1);
+        verifyLive("cctv-direct", channel.label() + " · Direct page", channel, channel.url, true);
+    }
+
+    @Test
+    @LivePlayback
+    public void beijingSatellitePlaysDirectly() throws Exception {
+        ChannelCatalog.Channel channel = ChannelCatalog.byNumber(21);
+        verifyLive("yangshipin-direct", channel.label() + " · Direct page", channel, channel.url, true);
+    }
+
+    @Test
+    @LivePlayback
+    public void cctv1PlaysDirectlyFromYangshipin() throws Exception {
+        ChannelCatalog.Channel channel = ChannelCatalog.byNumber(1);
+        // An alternate public channel page listed in DongYuTVWeb's bundled channel catalog.
+        verifyLive("cctv-yangshipin-direct", channel.label() + " · Yangshipin direct page", channel,
+                "https://www.yangshipin.cn/tv/home?pid=600001859", true);
+    }
+
+    private void verifyLive(String id, String label, ChannelCatalog.Channel channel, String url,
+                            boolean direct) throws Exception {
+        verify(id, label, channel, url, startupBudgetMs(), OBSERVATION_MS, direct);
+    }
+
+    private void verify(String id, String label, ChannelCatalog.Channel channel, String url,
+                        long startupMs, long observationMs, boolean direct) throws Exception {
         Instrumentation instrumentation = InstrumentationRegistry.getInstrumentation();
         File output = new File(instrumentation.getTargetContext().getFilesDir(), "live-playback-smoke");
         if (!output.isDirectory() && !output.mkdirs()) {
@@ -77,7 +111,8 @@ public class LivePlaybackSmokeTest {
 
         JSONObject report = new JSONObject()
                 .put("source", id)
-                .put("channel", "control".equals(id) ? "Local control video" : channel.label())
+                .put("channel", label)
+                .put("playbackPath", direct ? "direct" : "app")
                 .put("url", "control".equals(id) ? "local fixture" : url)
                 .put("startupBudgetMs", startupMs)
                 .put("appTimeoutMs", APP_STARTUP_MS)
@@ -87,7 +122,7 @@ public class LivePlaybackSmokeTest {
         JSONArray captures = new JSONArray();
         report.put("samples", samples).put("captures", captures);
 
-        try (ProbeSession session = new ProbeSession(instrumentation, startupMs)) {
+        try (ProbeSession session = new ProbeSession(instrumentation, startupMs, direct)) {
             session.load(channel, url);
             Snapshot first = awaitFirstFrame(session, samples, startupMs);
             if (first == null) {
@@ -108,10 +143,14 @@ public class LivePlaybackSmokeTest {
                         .put("withinAppTimeout", firstFrameMs <= APP_STARTUP_MS);
                 observe(session, first, observationMs, output, id, samples, captures, report);
             }
-            report.put("appReadyMs", session.readyAt == 0
+            report.put("pageReadyMs", session.pageReadyAt == 0
+                            ? JSONObject.NULL : session.pageReadyAt - session.startedAt)
+                    .put("videoElementMs", session.videoAt == 0
+                            ? JSONObject.NULL : session.videoAt - session.startedAt)
+                    .put("appReadyMs", session.readyAt == 0
                             ? JSONObject.NULL : session.readyAt - session.startedAt)
-                    .put("appReadyWithinDefaultTimeout",
-                            session.readyAt != 0 && session.readyAt - session.startedAt <= APP_STARTUP_MS);
+                    .put("appReadyWithinDefaultTimeout", direct ? JSONObject.NULL
+                            : session.readyAt != 0 && session.readyAt - session.startedAt <= APP_STARTUP_MS);
         } catch (Exception | AssertionError error) {
             report.put("exception", error.toString());
             throw error;
@@ -171,7 +210,9 @@ public class LivePlaybackSmokeTest {
                 .put("appFailure", session.failure == null ? JSONObject.NULL : session.failure);
 
         String result = "PASS";
-        if (session.failure != null || session.readyAt == 0) {
+        if (session.failure != null) {
+            result = "PLAYBACK_INTERRUPTED";
+        } else if (!session.direct && session.readyAt == 0) {
             result = "APP_PLAYBACK_NOT_READY";
         } else if (!visible) {
             result = "PICTURE_UNCONFIRMED";
@@ -288,24 +329,33 @@ public class LivePlaybackSmokeTest {
         private final Instrumentation instrumentation;
         private final ActivityScenario<SettingsActivity> scenario;
         private final String script;
+        private final boolean direct;
         private FrameLayout container;
         private ChannelPlayback playback;
+        private WebView directView;
         private volatile String failure;
         private volatile long readyAt;
         private long startedAt;
+        private long pageReadyAt;
+        private long videoAt;
         private Snapshot latest;
 
-        ProbeSession(Instrumentation instrumentation, long startupMs) throws Exception {
+        ProbeSession(Instrumentation instrumentation, long startupMs, boolean direct) throws Exception {
             this.instrumentation = instrumentation;
+            this.direct = direct;
             String probe = AssetUtil.readText(instrumentation.getContext(), "live-playback-probe.js");
             script = "window.tvViewerLivePlaybackProbe ? window.tvViewerLivePlaybackProbe() : ("
-                    + probe + ")()";
+                    + probe + ")(" + direct + ")";
             scenario = ActivityScenario.launch(SettingsActivity.class);
             scenario.onActivity(activity -> {
                 QbSdk.forceSysWebView();
                 container = new FrameLayout(activity);
                 container.setBackgroundColor(Color.BLACK);
                 activity.setContentView(container);
+                if (direct) {
+                    directView = createDirectView();
+                    return;
+                }
                 playback = new ChannelPlayback(container, false, false, new ChannelPlayback.Listener() {
                     @Override
                     public void onLoading(boolean hasPreviousChannel) {
@@ -324,10 +374,43 @@ public class LivePlaybackSmokeTest {
             });
         }
 
+        private WebView createDirectView() {
+            WebView view = new WebView(container.getContext());
+            WebSettings settings = view.getSettings();
+            settings.setJavaScriptEnabled(true);
+            settings.setDomStorageEnabled(true);
+            settings.setMediaPlaybackRequiresUserGesture(false);
+            settings.setUserAgent(ChannelPlayback.DESKTOP_USER_AGENT);
+            view.setWebViewClient(new WebViewClient() {
+                @Override
+                public void onReceivedError(WebView view, WebResourceRequest request,
+                                            WebResourceError error) {
+                    if (request.isForMainFrame()) {
+                        failure = "频道页面加载失败（WebView " + error.getErrorCode() + "）";
+                    }
+                }
+
+                @Override
+                public void onReceivedHttpError(WebView view, WebResourceRequest request,
+                                                WebResourceResponse error) {
+                    if (request.isForMainFrame()) {
+                        failure = "频道页面加载失败（HTTP " + error.getStatusCode() + "）";
+                    }
+                }
+            });
+            container.addView(view, new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+            return view;
+        }
+
         void load(ChannelCatalog.Channel channel, String url) {
             scenario.onActivity(activity -> {
                 startedAt = SystemClock.elapsedRealtime();
-                playback.load(channel.index(), url, channel.source);
+                if (direct) {
+                    directView.loadUrl(url);
+                } else {
+                    playback.load(channel.index(), url, channel.source);
+                }
             });
         }
 
@@ -360,6 +443,13 @@ public class LivePlaybackSmokeTest {
             long now = SystemClock.elapsedRealtime();
             JSONObject data = new JSONObject(value).put("elapsedMs", now - startedAt);
             latest = new Snapshot(now, data, bounds);
+            if (pageReadyAt == 0 && !data.optString("host").isEmpty()
+                    && "complete".equals(data.optString("state"))) {
+                pageReadyAt = now;
+            }
+            if (videoAt == 0 && data.optBoolean("videoFound")) {
+                videoAt = now;
+            }
             samples.put(data);
             return latest;
         }
@@ -400,7 +490,15 @@ public class LivePlaybackSmokeTest {
         @Override
         public void close() {
             try {
-                scenario.onActivity(activity -> playback.close());
+                scenario.onActivity(activity -> {
+                    if (direct) {
+                        container.removeView(directView);
+                        directView.stopLoading();
+                        directView.destroy();
+                    } else {
+                        playback.close();
+                    }
+                });
             } finally {
                 scenario.close();
             }

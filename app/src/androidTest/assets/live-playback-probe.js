@@ -1,8 +1,10 @@
-function () {
+function (triggerPlayback) {
     let video;
     let generation = 0;
     let presentedFrames = 0;
     let callback;
+    const clickedControls = new WeakSet();
+    const requestedSources = new WeakMap();
 
     function visibleArea(element) {
         const rect = element.getBoundingClientRect();
@@ -34,6 +36,23 @@ function () {
         }
     }
 
+    function tryPlaying() {
+        if (!triggerPlayback || (video && !video.paused)) return;
+        const control = Array.from(document.querySelectorAll(
+            '#play_or_pause_play_player, .play.play1')).find(element =>
+                visibleArea(element) > 0 && !clickedControls.has(element));
+        if (control) {
+            clickedControls.add(control);
+            control.click();
+        }
+        const source = video && (video.currentSrc || video.getAttribute('src'));
+        if (source && requestedSources.get(video) !== source) {
+            requestedSources.set(video, source);
+            const promise = video.play();
+            if (promise) promise.catch(() => {});
+        }
+    }
+
     function snapshot() {
         const candidates = Array.from(document.querySelectorAll('video'))
             .map(element => ({element, area: visibleArea(element)}))
@@ -41,6 +60,7 @@ function () {
             .sort((a, b) => Number(b.element.videoWidth > 0 && !b.element.paused)
                 - Number(a.element.videoWidth > 0 && !a.element.paused) || b.area - a.area);
         track(candidates.length ? candidates[0].element : null);
+        tryPlaying();
 
         const status = {
             host: location.hostname,
