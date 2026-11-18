@@ -2,7 +2,6 @@ package com.eanyatonic.cctvViewer;
 
 import android.content.Intent;
 import android.content.SharedPreferences;
-import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -23,17 +22,12 @@ public class LoadingActivity extends AppCompatActivity {
     private static final String TAG = "LoadingActivity";
     private static final int X5_INSTALL_SUCCESS = 200;
     private static final long INSTALL_TIMEOUT_MS = 45_000;
-    private static final String BUNDLED_KERNEL = "045738_x5.tbs.apk";
-    private static final String KERNEL_32 = "045738_x5.tbs_.apk";
-    private static final String KERNEL_64 = "046007_x5.tbs_.apk";
-    private static final String DOWNLOAD_BASE_URL = "http://void-tech.cn/wp-content/uploads/2024/10/";
-
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final ExecutorService preparation = Executors.newSingleThreadExecutor();
     private SharedPreferences preferences;
     private boolean installing;
     private boolean completed;
-    private String downloadedKernel;
+    private File downloadedKernel;
     private final Runnable onTimeout = () -> complete(R.string.x5_install_timeout);
 
     @Override
@@ -49,45 +43,51 @@ public class LoadingActivity extends AppCompatActivity {
         }
 
         String mode = preferences.getString("x5_webview_version", "0");
-        if ("0".equals(mode)) {
-            if (!AssetUtil.fileExistsInAssets(this, BUNDLED_KERNEL)) {
-                complete(R.string.x5_kernel_missing);
-                return;
-            }
-            handler.postDelayed(onTimeout, INSTALL_TIMEOUT_MS);
-            preparation.execute(this::prepareBundledKernel);
+        if ("0".equals(mode) && !AssetUtil.fileExistsInAssets(this, X5Kernel.BUNDLED.filename)) {
+            complete(R.string.x5_kernel_missing);
+            return;
+        }
+        X5Kernel kernel = X5Kernel.select(mode, X5Kernel.is64BitProcess());
+        String downloadedSource = getIntent().getStringExtra(DownloadActivity.EXTRA_KERNEL);
+        if (kernel == null || (downloadedSource != null && !kernel.name().equals(downloadedSource))) {
+            complete(R.string.x5_kernel_incompatible);
             return;
         }
 
-        boolean use64Bit = "2".equals(mode) || ("1".equals(mode) && isCpu64Bit());
-        downloadedKernel = use64Bit ? KERNEL_64 : KERNEL_32;
-        File directory = getExternalFilesDir("Download");
-        File file = directory == null ? null : new File(directory, downloadedKernel);
-        if (file == null || !file.isFile()) {
+        if (kernel == X5Kernel.BUNDLED) {
+            handler.postDelayed(onTimeout, INSTALL_TIMEOUT_MS);
+            preparation.execute(() -> prepareBundledKernel(kernel));
+            return;
+        }
+
+        downloadedKernel = kernel.downloadedFile(this);
+        if (downloadedKernel == null) {
+            complete(R.string.x5_kernel_missing);
+            return;
+        }
+        if (!downloadedKernel.isFile()) {
             Intent download = new Intent(this, DownloadActivity.class);
-            download.putExtra("file_url", DOWNLOAD_BASE_URL + downloadedKernel);
+            download.putExtra(DownloadActivity.EXTRA_KERNEL, kernel.name());
             startActivity(download);
             finish();
             return;
         }
 
         handler.postDelayed(onTimeout, INSTALL_TIMEOUT_MS);
-        install(use64Bit ? 46007 : 45738, file);
+        preparation.execute(() -> prepareInstallation(kernel, downloadedKernel));
     }
 
-    private void prepareBundledKernel() {
+    private void prepareBundledKernel(X5Kernel kernel) {
         File staged = null;
-        File kernel = null;
+        File prepared = null;
         try {
-            File directory = FileUtils.getTBSFileDir(getApplicationContext());
-            if (directory != null && (directory.isDirectory() || directory.mkdirs())) {
+            File directory = new File(getFilesDir(), "x5-kernel");
+            if (directory.isDirectory() || directory.mkdirs()) {
                 staged = File.createTempFile("x5-kernel-", ".tmp", directory);
-                if (FileUtils.copyAssets(getApplicationContext(), BUNDLED_KERNEL, staged.getPath())
-                        && !Thread.currentThread().isInterrupted()) {
-                    File destination = new File(directory, BUNDLED_KERNEL);
-                    if (staged.renameTo(destination)) {
-                        kernel = destination;
-                    }
+                AssetUtil.copy(this, kernel.filename, staged);
+                File destination = new File(directory, kernel.filename);
+                if (!Thread.currentThread().isInterrupted() && staged.renameTo(destination)) {
+                    prepared = destination;
                 }
             }
         } catch (IOException | RuntimeException error) {
@@ -97,16 +97,34 @@ public class LoadingActivity extends AppCompatActivity {
                 Log.w(TAG, "Could not remove the temporary X5 kernel");
             }
         }
+        prepareInstallation(kernel, prepared);
+    }
 
-        File prepared = kernel;
+    private void prepareInstallation(X5Kernel kernel, File file) {
+        int errorMessage = 0;
+        if (file == null) {
+            errorMessage = R.string.x5_kernel_missing;
+        } else {
+            try {
+                if (!kernel.matchesAbi(file)) {
+                    errorMessage = R.string.x5_kernel_incompatible;
+                }
+            } catch (IOException | RuntimeException error) {
+                Log.w(TAG, "Could not inspect the X5 kernel archive", error);
+                errorMessage = R.string.x5_kernel_missing;
+            }
+        }
+
+        int failure = errorMessage;
         handler.post(() -> {
             if (completed || isFinishing() || isDestroyed()) {
                 return;
             }
-            if (prepared == null) {
-                complete(R.string.x5_kernel_missing);
+            if (failure != 0) {
+                removeDownloadedKernel();
+                complete(failure);
             } else {
-                install(45738, prepared);
+                install(kernel.version, file);
             }
         });
     }
@@ -159,10 +177,16 @@ public class LoadingActivity extends AppCompatActivity {
         }
 
         Log.w(TAG, "X5 installation failed with status " + code);
-        if (code != X5_INSTALL_SUCCESS && downloadedKernel != null) {
-            FileUtils.deleteFile(getApplicationContext(), downloadedKernel);
+        if (code != X5_INSTALL_SUCCESS) {
+            removeDownloadedKernel();
         }
         complete(R.string.x5_install_failed);
+    }
+
+    private void removeDownloadedKernel() {
+        if (downloadedKernel != null && downloadedKernel.isFile() && !downloadedKernel.delete()) {
+            Log.w(TAG, "Could not remove the failed X5 kernel");
+        }
     }
 
     private void complete(int message) {
@@ -193,12 +217,4 @@ public class LoadingActivity extends AppCompatActivity {
         super.onDestroy();
     }
 
-    private static boolean isCpu64Bit() {
-        for (String abi : Build.SUPPORTED_ABIS) {
-            if (abi.contains("64")) {
-                return true;
-            }
-        }
-        return false;
-    }
 }

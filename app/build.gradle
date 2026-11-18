@@ -28,10 +28,6 @@ android {
         targetCompatibility JavaVersion.VERSION_17
     }
 
-    lintOptions {
-        abortOnError false // 允许构建过程中出现 lint 错误
-    }
-
 }
 
 dependencies {

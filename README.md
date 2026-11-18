@@ -2,11 +2,16 @@
 
 
 ## 下载安装包
-从Github Release下载：https://github.com/Eanya-Tonic/CCTV_Viewer/releases/latest
-<br>
-从百度网盘下载：https://pan.baidu.com/s/1e5wMCorJIp9oi5yN8mJ1KA?pwd=qozp 提取码：qozp
-<br>
-从 VoidTech 实验室下载（X5 内核 1.7.4 测试版）：https://void-tech.cn/wp-content/uploads/2024/10/CCTV_Viewer_1.7.4-X5Beta.zip
+
+当前分支最低支持 **Android 5.0（API 21）**。默认使用系统 WebView，建议在设备支持的情况下将系统 WebView 更新到可用版本。
+
+- 本仓库的调试 APK 在 [GitHub Actions](https://github.com/liumeng1201/TVViewer/actions/workflows/build.yml) 成功运行的 Artifacts 中下载，产物保留 1 天。标准版使用 `TVViewer-standard` 名称，X5 版使用 `TVViewer-X5` 名称。调试签名可能随构建而变化。
+- 标准版不内置 X5 内核。X5 版包含 `armeabi` 内核，供兼容的 32 位 ARM 进程使用。应用按当前进程选择内核，下载或安装失败时可返回系统 WebView。运行 X5 的实际兼容性以设备、应用进程和内核包为准。
+- [上游 GitHub Releases](https://github.com/Eanya-Tonic/CCTV_Viewer/releases/latest)、[原百度网盘](https://pan.baidu.com/s/1e5wMCorJIp9oi5yN8mJ1KA?pwd=qozp)（提取码 `qozp`）和 [旧版 X5 测试包](https://void-tech.cn/wp-content/uploads/2024/10/CCTV_Viewer_1.7.4-X5Beta.zip) 为上游发布渠道。
+
+## 构建与测试
+
+GitHub Actions 使用 JDK 17 构建标准版和 X5 版 Debug APK，检查两种产物的内置资源，并运行 Android Lint 和 API 30 模拟器回归测试。模拟器使用本地测试页面验证播放、换台和遥控输入。直播站点和实体盒子的内核兼容性需在设备上验证。
 
 ## 使用方法
 **电视盒子：**

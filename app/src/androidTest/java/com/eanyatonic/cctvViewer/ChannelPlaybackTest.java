@@ -5,6 +5,7 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
+import android.os.SystemClock;
 import android.util.Base64;
 import android.widget.FrameLayout;
 
@@ -26,9 +27,10 @@ import java.util.concurrent.TimeUnit;
 public class ChannelPlaybackTest {
     private static final long TEST_LOAD_TIMEOUT_MS = 5_000;
     private static final String NO_VIDEO = dataPage("<p>Channel without a video</p>");
-    private static final String PLAYING = dataPage("""
+    private static final String PLAYER_HTML = """
             <canvas id="canvas" width="32" height="32"></canvas>
-            <button class="videoFull"></button>
+            <button id="player_pagefullscreen_yes_player"></button>
+            <span class="tvSelectJiemu">当前节目</span>
             <video id="video" muted autoplay playsinline></video>
             <script>
             const canvas = document.getElementById('canvas');
@@ -41,8 +43,17 @@ public class ChannelPlaybackTest {
             const player = document.getElementById('video');
             player.srcObject = canvas.captureStream(10);
             player.play();
+            setTimeout(() => {
+                const button = document.createElement('button');
+                button.className = 'videoFull';
+                button.addEventListener('click', () => {
+                    window.fullscreenClicks = (window.fullscreenClicks || 0) + 1;
+                });
+                document.body.appendChild(button);
+            }, 500);
             </script>
-            """);
+            """;
+    private static final String PLAYING = dataPage(PLAYER_HTML);
 
     @Test
     public void timedOutChannelKeepsPreviousVideoAndAllowsRetry() throws Exception {
@@ -67,8 +78,8 @@ public class ChannelPlaybackTest {
     public void replacingPendingRequestDiscardsItsPageAndTimeout() throws Exception {
         try (PlaybackFixture fixture = new PlaybackFixture()) {
             fixture.scenario.onActivity(activity -> {
-                fixture.playback.load(0, NO_VIDEO, true);
-                fixture.playback.load(1, PLAYING, true);
+                fixture.playback.load(0, NO_VIDEO, ChannelCatalog.Source.CCTV);
+                fixture.playback.load(1, PLAYING, ChannelCatalog.Source.CCTV);
             });
             fixture.expect("ready:1");
             assertEquals(null, fixture.events.poll(TEST_LOAD_TIMEOUT_MS + 500, TimeUnit.MILLISECONDS));
@@ -88,6 +99,30 @@ public class ChannelPlaybackTest {
             assertTrue(event, event.startsWith("failed:0:频道页面加载失败"));
             fixture.load(1, PLAYING);
             fixture.expect("ready:1");
+        }
+    }
+
+    @Test
+    public void siteAdapterHandlesFullscreenControlInsertedAfterPageLoad() throws Exception {
+        try (PlaybackFixture fixture = new PlaybackFixture()) {
+            fixture.scenario.onActivity(activity ->
+                    fixture.playback.load(20, PLAYING, ChannelCatalog.Source.YANGSHIPIN));
+            fixture.expect("ready:20");
+            fixture.scenario.onActivity(activity ->
+                    assertEquals("当前节目", fixture.playback.activeProgramme()));
+
+            BlockingQueue<String> results = new LinkedBlockingQueue<>();
+            long deadline = SystemClock.uptimeMillis() + 4_000;
+            String clicks = null;
+            while (!"1".equals(clicks) && SystemClock.uptimeMillis() < deadline) {
+                fixture.scenario.onActivity(activity -> fixture.playback.activeView()
+                        .evaluateJavascript("window.fullscreenClicks || 0", value -> results.add(value)));
+                clicks = results.poll(500, TimeUnit.MILLISECONDS);
+                if (!"1".equals(clicks)) {
+                    SystemClock.sleep(50);
+                }
+            }
+            assertEquals("1", clicks);
         }
     }
 
@@ -128,7 +163,7 @@ public class ChannelPlaybackTest {
         }
 
         void load(int index, String url) {
-            scenario.onActivity(activity -> playback.load(index, url, true));
+            scenario.onActivity(activity -> playback.load(index, url, ChannelCatalog.Source.CCTV));
         }
 
         void expect(String expected) throws InterruptedException {

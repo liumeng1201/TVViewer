@@ -1,10 +1,7 @@
 package com.eanyatonic.cctvViewer;
 
 
-import android.Manifest;
 import androidx.core.content.ContextCompat;
-import androidx.core.app.ActivityCompat;
-import android.content.pm.PackageManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -14,10 +11,8 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
-import android.os.SystemClock;
 import android.util.Log;
 import android.view.KeyEvent;
-import android.view.MotionEvent;
 import android.view.View;
 import android.widget.Button;
 import android.widget.FrameLayout;
@@ -33,43 +28,17 @@ import com.tencent.smtt.export.external.TbsCoreSettings;
 import com.tencent.smtt.sdk.QbSdk;
 
 import java.util.HashMap;
+import java.util.List;
 
 public class MainActivity extends AppCompatActivity {
 
     private AudioManager audioManager;
     private ChannelPlayback playback;
 
-    private final String[] liveUrls = { "https://tv.cctv.com/live/cctv1/", "https://tv.cctv.com/live/cctv2/",
-            "https://tv.cctv.com/live/cctv3/", "https://tv.cctv.com/live/cctv4/", "https://tv.cctv.com/live/cctv5/",
-            "https://tv.cctv.com/live/cctv6/", "https://tv.cctv.com/live/cctv7/", "https://tv.cctv.com/live/cctv8/",
-            "https://tv.cctv.com/live/cctvjilu", "https://tv.cctv.com/live/cctv10/", "https://tv.cctv.com/live/cctv11/",
-            "https://tv.cctv.com/live/cctv12/", "https://tv.cctv.com/live/cctv13/",
-            "https://tv.cctv.com/live/cctvchild", "https://tv.cctv.com/live/cctv15/",
-            "https://tv.cctv.com/live/cctv16/", "https://tv.cctv.com/live/cctv17/",
-            "https://tv.cctv.com/live/cctv5plus/", "https://tv.cctv.com/live/cctveurope",
-            "https://tv.cctv.com/live/cctvamerica/", "https://www.yangshipin.cn/tv/home?pid=600002309",
-            "https://www.yangshipin.cn/tv/home?pid=600002521", "https://www.yangshipin.cn/tv/home?pid=600002483",
-            "https://www.yangshipin.cn/tv/home?pid=600002520", "https://www.yangshipin.cn/tv/home?pid=600002475",
-            "https://www.yangshipin.cn/tv/home?pid=600002508", "https://www.yangshipin.cn/tv/home?pid=600002485",
-            "https://www.yangshipin.cn/tv/home?pid=600002509", "https://www.yangshipin.cn/tv/home?pid=600002498",
-            "https://www.yangshipin.cn/tv/home?pid=600002506", "https://www.yangshipin.cn/tv/home?pid=600002531",
-            "https://www.yangshipin.cn/tv/home?pid=600002481", "https://www.yangshipin.cn/tv/home?pid=600002516",
-            "https://www.yangshipin.cn/tv/home?pid=600002525", "https://www.yangshipin.cn/tv/home?pid=600002484",
-            "https://www.yangshipin.cn/tv/home?pid=600002490", "https://www.yangshipin.cn/tv/home?pid=600002503",
-            "https://www.yangshipin.cn/tv/home?pid=600002505", "https://www.yangshipin.cn/tv/home?pid=600002532",
-            "https://www.yangshipin.cn/tv/home?pid=600002493", "https://www.yangshipin.cn/tv/home?pid=600002513", };
-
-    private final String[] channelNames = { "1 CCTV-1 综合", "2 CCTV-2 财经", "3 CCTV-3 综艺", "4 CCTV-4 中文国际（亚）",
-            "5 CCTV-5 体育", "6 CCTV-6 电影", "7 CCTV-7 国防军事", "8 CCTV-8 电视剧", "9 CCTV-9 纪录", "10 CCTV-10 科教",
-            "11 CCTV-11 戏曲", "12 CCTV-12 社会与法", "13 CCTV-13 新闻", "14 CCTV-14 少儿", "15 CCTV-15 音乐", "16 CCTV-16 奥林匹克",
-            "17 CCTV-17 农业农村", "18 CCTV-5+ 体育赛事", "19 CCTV-4 中文国际（欧）", "20 CCTV-4 中文国际（美）", "21 北京卫视", "22 江苏卫视",
-            "23 东方卫视", "24 浙江卫视", "25 湖南卫视", "26 湖北卫视", "27 广东卫视", "28 广西卫视", "29 黑龙江卫视", "30 海南卫视", "31 重庆卫视",
-            "32 深圳卫视", "33 四川卫视", "34 河南卫视", "35 福建东南卫视", "36 贵州卫视", "37 江西卫视", "38 辽宁卫视", "39 安徽卫视", "40 河北卫视",
-            "41 山东卫视", };
-
     private int currentLiveIndex;
 
     private static final String PREF_NAME = "MyPreferences";
+    private static final String PREF_KEY_CHANNEL_ID = "currentChannelId";
     private static final String PREF_KEY_LIVE_INDEX = "currentLiveIndex";
 
     private boolean doubleBackToExitPressedOnce = false;
@@ -184,102 +153,17 @@ public class MainActivity extends AppCompatActivity {
         // 初始化 CoreText
         CoreText = findViewById(R.id.CoreText);
 
-        LinearLayout DrawerLayout = findViewById(R.id.DrawerLayout);
-
-        // 中央台频道列表
-        String[] firstDrawer = {
-                "央视频道", "地方频道"
-        };
-
-        // 动态生成中央台按钮和地方台按钮
-        for (String channel : firstDrawer) {
-            Button button = new Button(this);
-            button.setText(channel);
-            // 创建 LayoutParams 并设置 margin
-            LinearLayout.LayoutParams layoutParams = new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-            layoutParams.setMargins(4, 4, 4, 4);
-            // 设置按钮属性
-            button.setLayoutParams(layoutParams);
-            button.setPadding(16, 16, 16, 16);
-            button.setTextColor(getResources().getColor(android.R.color.white));
-            button.setBackground(getResources().getDrawable(R.drawable.detailed_channel_selector));
-            button.setTextSize(TEXT_SIZE);
-            DrawerLayout.addView(button);
+        for (ChannelCatalog.Source source : ChannelCatalog.Source.values()) {
+            DrawerLayout.addView(createDrawerButton(source.groupName, 4));
         }
-
-        // 添加设置按钮
-        Button SettingButton = new Button(this);
-        SettingButton.setText("打开设置");
-        // 创建 LayoutParams 并设置 margin
-        LinearLayout.LayoutParams layoutParams0 = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        layoutParams0.setMargins(4, 28, 4, 4);
-        // 设置按钮属性
-        SettingButton.setLayoutParams(layoutParams0);
-        SettingButton.setPadding(16, 16, 16, 16);
-        SettingButton.setTextColor(getResources().getColor(android.R.color.white));
-        SettingButton.setBackground(getResources().getDrawable(R.drawable.detailed_channel_selector));
-        SettingButton.setTextSize(TEXT_SIZE);
-        DrawerLayout.addView(SettingButton);
-
-        LinearLayout subMenuCCTV = findViewById(R.id.subMenuCCTV);
-        LinearLayout subMenuLocal = findViewById(R.id.subMenuLocal);
-
-        // 中央台频道列表
-        String[] cctvChannels = {
-                "CCTV-1 综合", "CCTV-2 财经", "CCTV-3 综艺", "CCTV-4 中文国际（亚）",
-                "CCTV-5 体育", "CCTV-6 电影", "CCTV-7 国防军事", "CCTV-8 电视剧",
-                "CCTV-9 纪录", "CCTV-10 科教", "CCTV-11 戏曲", "CCTV-12 社会与法",
-                "CCTV-13 新闻", "CCTV-14 少儿", "CCTV-15 音乐", "CCTV-16 奥林匹克",
-                "CCTV-17 农业农村", "CCTV-5+ 体育赛事", "CCTV-4 中文国际（欧）", "CCTV-4 中文国际（美）"
-        };
-
-        // 动态生成中央台按钮
-        for (String channel : cctvChannels) {
-            Button button = new Button(this);
-            button.setText(channel);
-            // 创建 LayoutParams 并设置 margin
-            LinearLayout.LayoutParams layoutParams = new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-            layoutParams.setMargins(4, 4, 4, 4);
-            // 设置按钮属性
-            button.setLayoutParams(layoutParams);
-            button.setPadding(16, 16, 16, 16);
-            button.setTextColor(getResources().getColor(android.R.color.white));
-            button.setBackground(getResources().getDrawable(R.drawable.detailed_channel_selector));
-            button.setTextSize(TEXT_SIZE);
-            subMenuCCTV.addView(button);
-        }
-
-        // 地方台频道列表
-        String[] localChannels = {
-                "北京卫视", "江苏卫视", "东方卫视", "浙江卫视", "湖南卫视", "湖北卫视",
-                "广东卫视", "广西卫视", "黑龙江卫视", "海南卫视", "重庆卫视", "深圳卫视",
-                "四川卫视", "河南卫视", "福建东南卫视", "贵州卫视", "江西卫视", "辽宁卫视",
-                "安徽卫视", "河北卫视", "山西卫视"
-        };
-
-        // 动态生成地方台按钮
-        for (String channel : localChannels) {
-            Button button = new Button(this);
-            button.setText(channel);
-            // 创建 LayoutParams 并设置 margin
-            LinearLayout.LayoutParams layoutParams = new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-            layoutParams.setMargins(4, 4, 4, 4);
-            // 设置按钮属性
-            button.setLayoutParams(layoutParams);
-            button.setPadding(16, 16, 16, 16);
-            button.setTextColor(getResources().getColor(android.R.color.white));
-            button.setBackground(getResources().getDrawable(R.drawable.detailed_channel_selector));
-            button.setTextSize(TEXT_SIZE);
-            subMenuLocal.addView(button);
-        }
+        Button settingsButton = createDrawerButton("打开设置", 28);
+        settingsButton.setOnClickListener(view -> openSettings());
+        DrawerLayout.addView(settingsButton);
+        addChannelButtons(SubMenuCCTV, ChannelCatalog.CCTV);
+        addChannelButtons(SubMenuLocal, ChannelCatalog.PROVINCIAL);
 
         if (canLoadX5) {
             CoreText.setText("当前程序运行在腾讯X5内核上");
-            requestPermission();
         } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             PackageInfo pkgInfo = android.webkit.WebView.getCurrentWebViewPackage();
             if (pkgInfo != null) {
@@ -295,7 +179,7 @@ public class MainActivity extends AppCompatActivity {
                         hideChannelOverlay();
                         loadingOverlay.setVisibility(hasPreviousChannel ? View.GONE : View.VISIBLE);
                         if (hasPreviousChannel) {
-                            showOverlay(channelNames[currentLiveIndex] + "\n正在切换频道…");
+                            showOverlay(ChannelCatalog.at(currentLiveIndex).label() + "\n正在切换频道…");
                         }
                     }
 
@@ -303,17 +187,53 @@ public class MainActivity extends AppCompatActivity {
                     public void onReady(int channelIndex, String programme) {
                         loadingOverlay.setVisibility(View.GONE);
                         saveCurrentLiveIndex();
-                        showOverlay(channelNames[channelIndex] + "\n" + programme);
+                        showOverlay(ChannelCatalog.at(channelIndex).label() + "\n" + programme);
                     }
 
                     @Override
                     public void onFailure(int channelIndex, String reason) {
                         loadingOverlay.setVisibility(View.GONE);
-                        showOverlay(channelNames[channelIndex] + "\n" + reason
+                        showOverlay(ChannelCatalog.at(channelIndex).label() + "\n" + reason
                                 + "\n可换台，或按菜单键后选择刷新重试");
                     }
                 });
         loadLastLiveIndex();
+    }
+
+    private Button createDrawerButton(String text, int topMargin) {
+        Button button = new Button(this);
+        button.setText(text);
+        LinearLayout.LayoutParams size = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        size.setMargins(4, topMargin, 4, 4);
+        button.setLayoutParams(size);
+        button.setPadding(16, 16, 16, 16);
+        button.setTextColor(ContextCompat.getColor(this, android.R.color.white));
+        button.setBackground(ContextCompat.getDrawable(this, R.drawable.detailed_channel_selector));
+        button.setTextSize(TEXT_SIZE);
+        return button;
+    }
+
+    private void addChannelButtons(LinearLayout menu, List<ChannelCatalog.Channel> channels) {
+        for (ChannelCatalog.Channel channel : channels) {
+            Button button = createDrawerButton(channel.name, 4);
+            button.setOnClickListener(view -> selectChannel(channel));
+            menu.addView(button);
+        }
+    }
+
+    private void selectChannel(ChannelCatalog.Channel channel) {
+        currentLiveIndex = channel.index();
+        loadLiveUrl();
+        closeChannelList();
+    }
+
+    private void openSettings() {
+        closeChannelList();
+        if (isMenuOverlayVisible) {
+            showMenuOverlay();
+        }
+        startActivity(new Intent(this, SettingsActivity.class));
     }
 
     private boolean prepareWebViewKernel(SharedPreferences preferences) {
@@ -395,44 +315,11 @@ public class MainActivity extends AppCompatActivity {
                             showMenuOverlay();
                             break;
                         case 1:
-                            // 播放
-                            if (playback.activeView() == null) {
-                                break;
-                            }
-                            if (playback.activeChannel() <= 19) {
-                                simulateTouch(playback.activeView(), 0.5f, 0.5f);
-                            } else {
-                                String scriptPause = """
-                                        try{
-                                        document.querySelector('.play.play2').click();
-                                        } catch(e) {
-                                        document.querySelector('.play.play1').click();
-                                        }
-                                        """;
-                                playback.activeView().evaluateJavascript(scriptPause, null);
-                            }
+                            playback.togglePlayback();
                             showMenuOverlay();
                             break;
                         case 2:
-                            // 切换全屏
-                            String script1 = """
-                                    console.log('点击全屏按钮');
-                                    document.querySelector('#player_pagefullscreen_yes_player').click();
-                                    """;
-
-                            String script2 = """
-                                    console.log('点击全屏按钮');
-                                    if(document.querySelector('.videoFull').id == ''){
-                                        document.querySelector('.videoFull').click();
-                                    }else{
-                                        document.querySelector('.videoFull_ac').click();
-                                    }
-                                    """;
-
-                            if (playback.activeView() != null) {
-                                playback.activeView().evaluateJavascript(
-                                        playback.activeChannel() <= 19 ? script1 : script2, null);
-                            }
+                            playback.toggleFullscreen();
                             break;
                         case 3:
                             // 放大
@@ -488,8 +375,7 @@ public class MainActivity extends AppCompatActivity {
                             break;
                         case 5:
                             // 打开设置
-                            Intent intent = new Intent(this, SettingsActivity.class);
-                            startActivity(intent);
+                            openSettings();
                             break;
                     }
                     return true;
@@ -546,9 +432,7 @@ public class MainActivity extends AppCompatActivity {
                             SubMenuLocal.getChildAt(SubMenuLocalSelectedIndex).requestFocus();
                             break;
                         case 2:
-                            // 打开设置
-                            showChannelList();
-                            showMenuOverlay();
+                            openSettings();
                             break;
                     }
                     return true;
@@ -577,12 +461,12 @@ public class MainActivity extends AppCompatActivity {
                     // 方向键,切换频道选择
                     if (event.getKeyCode() == KeyEvent.KEYCODE_DPAD_UP) {
                         if (SubMenuCCTVSelectedIndex == 0) {
-                            SubMenuCCTVSelectedIndex = 19;
+                            SubMenuCCTVSelectedIndex = ChannelCatalog.CCTV.size() - 1;
                         } else {
                             SubMenuCCTVSelectedIndex--;
                         }
                     } else if (event.getKeyCode() == KeyEvent.KEYCODE_DPAD_DOWN) {
-                        if (SubMenuCCTVSelectedIndex == 19) {
+                        if (SubMenuCCTVSelectedIndex == ChannelCatalog.CCTV.size() - 1) {
                             SubMenuCCTVSelectedIndex = 0;
                         } else {
                             SubMenuCCTVSelectedIndex++;
@@ -594,9 +478,7 @@ public class MainActivity extends AppCompatActivity {
                         || event.getKeyCode() == KeyEvent.KEYCODE_ENTER
                         || event.getKeyCode() == KeyEvent.KEYCODE_DPAD_RIGHT) {
                     // 中间键,执行按钮操作
-                    currentLiveIndex = SubMenuCCTVSelectedIndex;
-                    loadLiveUrl();
-                    showChannelList();
+                    selectChannel(ChannelCatalog.CCTV.get(SubMenuCCTVSelectedIndex));
                     return true;
                 }
             } else if (SubMenuLocal.hasFocus()) {
@@ -623,12 +505,12 @@ public class MainActivity extends AppCompatActivity {
                     // 方向键,切换频道选择
                     if (event.getKeyCode() == KeyEvent.KEYCODE_DPAD_UP) {
                         if (SubMenuLocalSelectedIndex == 0) {
-                            SubMenuLocalSelectedIndex = 20;
+                            SubMenuLocalSelectedIndex = ChannelCatalog.PROVINCIAL.size() - 1;
                         } else {
                             SubMenuLocalSelectedIndex--;
                         }
                     } else if (event.getKeyCode() == KeyEvent.KEYCODE_DPAD_DOWN) {
-                        if (SubMenuLocalSelectedIndex == 20) {
+                        if (SubMenuLocalSelectedIndex == ChannelCatalog.PROVINCIAL.size() - 1) {
                             SubMenuLocalSelectedIndex = 0;
                         } else {
                             SubMenuLocalSelectedIndex++;
@@ -640,9 +522,7 @@ public class MainActivity extends AppCompatActivity {
                         || event.getKeyCode() == KeyEvent.KEYCODE_ENTER
                         || event.getKeyCode() == KeyEvent.KEYCODE_DPAD_RIGHT) {
                     // 中间键,执行按钮操作
-                    currentLiveIndex = SubMenuLocalSelectedIndex + 20;
-                    loadLiveUrl();
-                    showChannelList();
+                    selectChannel(ChannelCatalog.PROVINCIAL.get(SubMenuLocalSelectedIndex));
                     return true;
                 }
             } else if (DrawerLayoutDetailed.hasFocus()) {
@@ -662,7 +542,7 @@ public class MainActivity extends AppCompatActivity {
                 // 显示节目列表
                 int active = playback.activeChannel();
                 if (active >= 0) {
-                    showOverlay(channelNames[active] + "\n" + playback.activeProgramme());
+                    showOverlay(ChannelCatalog.at(active).label() + "\n" + playback.activeProgramme());
                 }
                 return true; // 返回 true 表示事件已处理，不传递给 WebView
             } else if (event.getKeyCode() == KeyEvent.KEYCODE_MENU
@@ -674,7 +554,7 @@ public class MainActivity extends AppCompatActivity {
             } else if (event.getKeyCode() >= KeyEvent.KEYCODE_0
                     && event.getKeyCode() <= KeyEvent.KEYCODE_9) {
                 if (event.getRepeatCount() == 0
-                        && digitBuffer.length() < String.valueOf(liveUrls.length).length()) {
+                        && digitBuffer.length() < String.valueOf(ChannelCatalog.size()).length()) {
                     digitBuffer.append(event.getKeyCode() - KeyEvent.KEYCODE_0);
                     handler.removeCallbacks(submitDigits);
                     handler.postDelayed(submitDigits, DIGIT_TIMEOUT);
@@ -711,65 +591,43 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // 频道选择列表
     private void showChannelList() {
-        // 显示频道抽屉
-        if (!isDrawerOverlayVisible) {
-            DrawerLayoutDetailed.setVisibility(View.VISIBLE);
-            DrawerLayout.setVisibility(View.VISIBLE);
-            isDrawerOverlayVisible = true;
-            if (currentLiveIndex < 20) {
-                SubMenuCCTV.setVisibility(View.VISIBLE);
-                findViewById(R.id.CCTVScroll).setVisibility(View.VISIBLE);
-                SubMenuCCTV.getChildAt(currentLiveIndex).requestFocus();
-                SubMenuCCTVSelectedIndex = currentLiveIndex;
-                DrawerLayoutSelectedIndex = 0;
-            } else {
-                SubMenuLocal.setVisibility(View.VISIBLE);
-                findViewById(R.id.LocalScroll).setVisibility(View.VISIBLE);
-                SubMenuLocal.getChildAt(currentLiveIndex - 20).requestFocus();
-                SubMenuLocalSelectedIndex = currentLiveIndex - 20;
-                DrawerLayoutSelectedIndex = 1;
-            }
+        if (isDrawerOverlayVisible) {
+            closeChannelList();
         } else {
-            DrawerLayout.setVisibility(View.GONE);
-            SubMenuCCTV.setVisibility(View.GONE);
-            SubMenuLocal.setVisibility(View.GONE);
-            findViewById(R.id.LocalScroll).setVisibility(View.GONE);
-            findViewById(R.id.CCTVScroll).setVisibility(View.GONE);
-            DrawerLayoutDetailed.setVisibility(View.GONE);
-            isDrawerOverlayVisible = false;
+            openChannelList(currentLiveIndex);
         }
     }
 
-    private void showChannelListDPAD(int selectIndex) {
-        // 显示频道抽屉
-        if (!isDrawerOverlayVisible) {
-            DrawerLayoutDetailed.setVisibility(View.VISIBLE);
-            DrawerLayout.setVisibility(View.VISIBLE);
-            isDrawerOverlayVisible = true;
-            if (selectIndex < 20) {
-                SubMenuCCTV.setVisibility(View.VISIBLE);
-                findViewById(R.id.CCTVScroll).setVisibility(View.VISIBLE);
-                SubMenuCCTV.getChildAt(selectIndex).requestFocus();
-                SubMenuCCTVSelectedIndex = selectIndex;
-                DrawerLayoutSelectedIndex = 0;
-            } else {
-                SubMenuLocal.setVisibility(View.VISIBLE);
-                findViewById(R.id.LocalScroll).setVisibility(View.VISIBLE);
-                SubMenuLocal.getChildAt(selectIndex - 20).requestFocus();
-                SubMenuLocalSelectedIndex = selectIndex - 20;
-                DrawerLayoutSelectedIndex = 1;
-            }
+    private void openChannelList(int index) {
+        ChannelCatalog.Channel channel = ChannelCatalog.at(index);
+        boolean isCctv = channel.source == ChannelCatalog.Source.CCTV;
+        DrawerLayout.setVisibility(View.VISIBLE);
+        DrawerLayoutDetailed.setVisibility(View.VISIBLE);
+        isDrawerOverlayVisible = true;
+        SubMenuCCTV.setVisibility(isCctv ? View.VISIBLE : View.GONE);
+        findViewById(R.id.CCTVScroll).setVisibility(isCctv ? View.VISIBLE : View.GONE);
+        SubMenuLocal.setVisibility(isCctv ? View.GONE : View.VISIBLE);
+        findViewById(R.id.LocalScroll).setVisibility(isCctv ? View.GONE : View.VISIBLE);
+        if (isCctv) {
+            SubMenuCCTVSelectedIndex = ChannelCatalog.CCTV.indexOf(channel);
+            DrawerLayoutSelectedIndex = 0;
+            SubMenuCCTV.getChildAt(SubMenuCCTVSelectedIndex).requestFocus();
         } else {
-            DrawerLayout.setVisibility(View.GONE);
-            SubMenuCCTV.setVisibility(View.GONE);
-            SubMenuLocal.setVisibility(View.GONE);
-            findViewById(R.id.LocalScroll).setVisibility(View.GONE);
-            findViewById(R.id.CCTVScroll).setVisibility(View.GONE);
-            DrawerLayoutDetailed.setVisibility(View.GONE);
-            isDrawerOverlayVisible = false;
+            SubMenuLocalSelectedIndex = ChannelCatalog.PROVINCIAL.indexOf(channel);
+            DrawerLayoutSelectedIndex = 1;
+            SubMenuLocal.getChildAt(SubMenuLocalSelectedIndex).requestFocus();
         }
+    }
+
+    private void closeChannelList() {
+        DrawerLayout.setVisibility(View.GONE);
+        SubMenuCCTV.setVisibility(View.GONE);
+        SubMenuLocal.setVisibility(View.GONE);
+        findViewById(R.id.LocalScroll).setVisibility(View.GONE);
+        findViewById(R.id.CCTVScroll).setVisibility(View.GONE);
+        DrawerLayoutDetailed.setVisibility(View.GONE);
+        isDrawerOverlayVisible = false;
     }
 
     private void handleNumericInput() {
@@ -779,8 +637,9 @@ public class MainActivity extends AppCompatActivity {
 
         int number = Integer.parseInt(digitBuffer.toString());
         clearNumericInput();
-        if (number > 0 && number <= liveUrls.length) {
-            currentLiveIndex = number - 1;
+        ChannelCatalog.Channel channel = ChannelCatalog.byNumber(number);
+        if (channel != null) {
+            currentLiveIndex = channel.index();
             loadLiveUrl();
         } else {
             showOverlay("频道号无效");
@@ -803,57 +662,49 @@ public class MainActivity extends AppCompatActivity {
 
     private void loadLastLiveIndex() {
         SharedPreferences preferences = getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
-        int savedIndex = preferences.getInt(PREF_KEY_LIVE_INDEX, 0);
-        currentLiveIndex = savedIndex >= 0 && savedIndex < liveUrls.length ? savedIndex : 0;
+        ChannelCatalog.Channel saved = ChannelCatalog.byId(preferences.getString(PREF_KEY_CHANNEL_ID, null));
+        if (saved == null) {
+            saved = ChannelCatalog.byNumber(preferences.getInt(PREF_KEY_LIVE_INDEX, 0) + 1);
+            if (saved != null) {
+                storeChannel(preferences, saved);
+            }
+        }
+        currentLiveIndex = saved == null ? 0 : saved.index();
         loadLiveUrl();
     }
 
     private void saveCurrentLiveIndex() {
         SharedPreferences preferences = getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
-        SharedPreferences.Editor editor = preferences.edit();
-        editor.putInt(PREF_KEY_LIVE_INDEX, playback.activeChannel());
-        editor.apply();
+        storeChannel(preferences, ChannelCatalog.at(playback.activeChannel()));
+    }
+
+    private void storeChannel(SharedPreferences preferences, ChannelCatalog.Channel channel) {
+        preferences.edit().putString(PREF_KEY_CHANNEL_ID, channel.id)
+                .remove(PREF_KEY_LIVE_INDEX).apply();
     }
 
     private void loadLiveUrl() {
         clearNumericInput();
-        playback.load(currentLiveIndex, liveUrls[currentLiveIndex], currentLiveIndex < 20);
+        ChannelCatalog.Channel channel = ChannelCatalog.at(currentLiveIndex);
+        playback.load(channel.index(), channel.url, channel.source);
     }
 
     private void navigateToPreviousLive() {
         if (enableDirectChannelChange) {
-            currentLiveIndex = (currentLiveIndex - 1 + liveUrls.length) % liveUrls.length;
+            currentLiveIndex = (currentLiveIndex - 1 + ChannelCatalog.size()) % ChannelCatalog.size();
             loadLiveUrl();
         } else {
-            showChannelListDPAD((currentLiveIndex - 1 + liveUrls.length) % liveUrls.length);
+            openChannelList((currentLiveIndex - 1 + ChannelCatalog.size()) % ChannelCatalog.size());
         }
     }
 
     private void navigateToNextLive() {
         if (enableDirectChannelChange) {
-            currentLiveIndex = (currentLiveIndex + 1 + liveUrls.length) % liveUrls.length;
+            currentLiveIndex = (currentLiveIndex + 1 + ChannelCatalog.size()) % ChannelCatalog.size();
             loadLiveUrl();
         } else {
-            showChannelListDPAD((currentLiveIndex + 1 + liveUrls.length) % liveUrls.length);
+            openChannelList((currentLiveIndex + 1 + ChannelCatalog.size()) % ChannelCatalog.size());
         }
-    }
-
-    // 在需要模拟触摸的地方调用该方法
-    public void simulateTouch(View view, float x, float y) {
-        long downTime = SystemClock.uptimeMillis();
-        long eventTime = SystemClock.uptimeMillis() + 100;
-
-        // 构造 ACTION_DOWN 事件
-        MotionEvent downEvent = MotionEvent.obtain(downTime, eventTime, MotionEvent.ACTION_DOWN, x, y, 0);
-        view.dispatchTouchEvent(downEvent);
-
-        // 构造 ACTION_UP 事件
-        MotionEvent upEvent = MotionEvent.obtain(downTime, eventTime + 100, MotionEvent.ACTION_UP, x, y, 0);
-        view.dispatchTouchEvent(upEvent);
-
-        // 释放事件对象
-        downEvent.recycle();
-        upEvent.recycle();
     }
 
     private void showOverlay(String channelInfo) {
@@ -894,14 +745,4 @@ public class MainActivity extends AppCompatActivity {
         super.onDestroy();
     }
 
-    private boolean checkPermission() {
-        return ContextCompat.checkSelfPermission(this,
-                Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED;
-    }
-
-    private void requestPermission() {
-        if (!checkPermission()) {
-            ActivityCompat.requestPermissions(this, new String[] { Manifest.permission.WRITE_EXTERNAL_STORAGE , Manifest.permission.READ_EXTERNAL_STORAGE}, 1);
-        }
-    }
 }

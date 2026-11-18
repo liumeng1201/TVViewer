@@ -5,6 +5,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
 import android.util.DisplayMetrics;
+import android.util.Log;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
@@ -23,6 +24,9 @@ import com.tencent.smtt.sdk.WebViewClient;
 import org.json.JSONArray;
 import org.json.JSONException;
 
+import java.io.IOException;
+import java.util.EnumMap;
+
 final class ChannelPlayback {
     interface Listener {
         void onLoading(boolean hasPreviousChannel);
@@ -36,71 +40,16 @@ final class ChannelPlayback {
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                     + "(KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36";
 
-    private static final String FAST_LOADING = """
-            function FastLoading() {
-                         const fullscreenBtn = document.querySelector('#player_pagefullscreen_yes_player') || document.querySelector('.videoFull');
-                         if (fullscreenBtn) return;
-
-                         // 清空所有图片的 src 属性，阻止图片加载
-                         Array.from(document.getElementsByTagName('img')).forEach(img => {
-                             img.src = '';
-                         });
-
-                         // 清空特定的脚本 src 属性
-                         const scriptKeywords = ['login', 'index', 'daohang', 'grey', 'jquery'];
-                         Array.from(document.getElementsByTagName('script')).forEach(script => {
-                             if (scriptKeywords.some(keyword => script.src.includes(keyword))) {
-                                 script.src = '';
-                             }
-                         });
-
-                         // 清空具有特定 class 的 div 内容
-                         const classNames = ['newmap', 'newtopbz', 'newtopbzTV', 'column_wrapper'];
-                         classNames.forEach(className => {
-                             Array.from(document.getElementsByClassName(className)).forEach(div => {
-                                 div.innerHTML = '';
-                             });
-                         });
-
-                         // 递归调用 FastLoading，每 4ms 触发一次
-                         setTimeout(FastLoading, 4);
-                     }
-
-                     FastLoading();
-            """;
-
-    private static final String AUTO_FULLSCREEN = """
-            (function fullscreen() {
-                const button = document.querySelector('#player_pagefullscreen_yes_player,.videoFull');
-                if (!button) {
-                    setTimeout(fullscreen, 16);
-                    return;
-                }
-                button.click();
-                const video = document.querySelector('video');
-                if (video) video.volume = 1;
-            })();
-            """;
-
-    private static final String PLAYBACK_STATUS = """
-            (function() {
-                const video = Array.from(document.querySelectorAll('video'))
-                    .find(player => player.currentSrc || player.src)
-                    || document.querySelector('video');
-                if (video && video.error) return ['error', ''];
-                if (!video || video.paused || video.ended || video.readyState < 2
-                    || (video.currentTime <= 0 && video.readyState < 3)) return ['waiting', ''];
-                const programme = Array.from(document.querySelectorAll('%s'))
-                    .map(item => item.textContent.trim()).filter(Boolean).join('\\n');
-                return ['playing', programme];
-            })();
-            """;
+    private static final String PLAYBACK_STATUS =
+            "window.tvViewerPlayback && window.tvViewerPlayback.status()";
 
     private final FrameLayout container;
     private final boolean dualWebView;
     private final boolean x5;
     private final Listener listener;
     private final long loadTimeoutMs;
+    private final EnumMap<ChannelCatalog.Source, String> adapters =
+            new EnumMap<>(ChannelCatalog.Source.class);
     private final Handler handler = new Handler(Looper.getMainLooper());
     private Request pending;
     private Request active;
@@ -119,7 +68,7 @@ final class ChannelPlayback {
         this.loadTimeoutMs = loadTimeoutMs;
     }
 
-    void load(int channelIndex, String url, boolean cctv) {
+    void load(int channelIndex, String url, ChannelCatalog.Source source) {
         discardPending();
         if (!dualWebView) {
             destroy(active);
@@ -127,7 +76,7 @@ final class ChannelPlayback {
         }
         listener.onLoading(active != null);
         WebView view = createView();
-        Request request = new Request(view, channelIndex, url, cctv);
+        Request request = new Request(view, channelIndex, url, source);
         pending = request;
         view.setWebViewClient(new PlaybackClient(request));
         container.addView(view, 0, new FrameLayout.LayoutParams(
@@ -149,6 +98,21 @@ final class ChannelPlayback {
 
     String activeProgramme() {
         return active == null ? "" : active.programme;
+    }
+
+    void togglePlayback() {
+        runPlayerAction("togglePlayback");
+    }
+
+    void toggleFullscreen() {
+        runPlayerAction("toggleFullscreen");
+    }
+
+    private void runPlayerAction(String action) {
+        if (active != null) {
+            active.view.evaluateJavascript(
+                    "window.tvViewerPlayback && window.tvViewerPlayback." + action + "()", null);
+        }
     }
 
     void pause() {
@@ -206,13 +170,22 @@ final class ChannelPlayback {
         return view;
     }
 
+    private String adapterScript(ChannelCatalog.Source source) throws IOException {
+        String script = adapters.get(source);
+        if (script == null) {
+            String player = AssetUtil.readText(container.getContext(), "playback/player.js");
+            String site = AssetUtil.readText(container.getContext(), "playback/" + source.id + ".js");
+            script = player.trim() + "(" + site.trim() + ");";
+            adapters.put(source, script);
+        }
+        return script;
+    }
+
     private void checkPlayback(Request request, int navigation) {
         if (request != pending || navigation != request.navigation) {
             return;
         }
-        String selectors = request.cctv ? "#jiemu > li.cur.act,#jiemu > li:nth-child(4)"
-                : ".tvSelectJiemu:nth-child(-n+2)";
-        request.view.evaluateJavascript(String.format(PLAYBACK_STATUS, selectors), value -> {
+        request.view.evaluateJavascript(PLAYBACK_STATUS, value -> {
             if (request != pending || navigation != request.navigation) {
                 return;
             }
@@ -287,7 +260,6 @@ final class ChannelPlayback {
             if (request == pending) {
                 request.navigation++;
                 request.loadingUrl = url;
-                view.evaluateJavascript(FAST_LOADING, null);
             }
         }
 
@@ -299,7 +271,13 @@ final class ChannelPlayback {
                 return;
             }
             request.checkedNavigation = request.navigation;
-            view.evaluateJavascript(AUTO_FULLSCREEN, null);
+            try {
+                view.evaluateJavascript(adapterScript(request.source), null);
+            } catch (IOException error) {
+                Log.e("ChannelPlayback", "Could not read the site adapter", error);
+                fail(request, "频道适配脚本不可用");
+                return;
+            }
             checkPlayback(request, request.navigation);
         }
 
@@ -331,17 +309,17 @@ final class ChannelPlayback {
         final WebView view;
         final int channelIndex;
         final String url;
-        final boolean cctv;
+        final ChannelCatalog.Source source;
         String loadingUrl;
         int navigation;
         int checkedNavigation = -1;
         String programme = "";
 
-        Request(WebView view, int channelIndex, String url, boolean cctv) {
+        Request(WebView view, int channelIndex, String url, ChannelCatalog.Source source) {
             this.view = view;
             this.channelIndex = channelIndex;
             this.url = url;
-            this.cctv = cctv;
+            this.source = source;
         }
     }
 }
